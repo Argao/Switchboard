@@ -26,6 +26,17 @@ Switchboard leaves your OpenRGB setup alone until you change a lighting control 
 
 The phone lists the windows open on the computer and can close one, end its program, or make it cover a screen of your choice (and put it back). This works on Windows for now; on other systems the Apps area stays hidden. Programs running as administrator can only be changed at the computer.
 
+## Total shutdown
+
+With the computer plugged into a Tuya smart plug (the kind set up with the Smart Life app, sold under many brands), the phone can shut it down and then have the plug cut the power, at once or on a timer. The plug counts the wait by itself, since by then the computer is off.
+
+Set the plug up in the desktop app, under Settings, Total shutdown:
+
+- **From Smart Life**: enter the User Code from the app (Me, settings, Account and Security), scan the QR code with it, and pick the plug. Switchboard reads the plug's key from your account once and then finds the plug on your network. This uses the sign-in Tuya provides for Home Assistant, so it may stop working; the next way always does.
+- **Enter by hand**: the plug's address and its 16-character local key, read from a Tuya developer account.
+
+After that the computer talks to the plug directly, with no cloud. Only plugs on protocol 3.5 are supported for now. Programs still open are closed without asking, so unsaved work is lost. Everything else on the same plug loses power too, and the computer cannot be switched back on from the phone. A total shutdown is refused while Windows has an update waiting to install.
+
 ## Layout
 
 ```
