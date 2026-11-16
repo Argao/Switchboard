@@ -12,6 +12,16 @@ curl -fsSL https://raw.githubusercontent.com/aiyu-ayaan/Switchboard/master/scrip
 
 Add `-s -- --channel beta` for beta builds, `-s -- --version 0.0.1` for one release, or `-s -- --uninstall` to remove it. Run it again to update. The Windows installer, the `.deb` and the Android APK are on the [Releases](https://github.com/aiyu-ayaan/Switchboard/releases) page.
 
+## RGB lighting
+
+The lighting controls (on/off, brightness, color, effects) need [OpenRGB](https://openrgb.org) on the computer; Switchboard draws the effects and OpenRGB talks to the hardware. Without it everything else works, and the lighting controls stay hidden.
+
+1. Install OpenRGB and check that it lists your devices.
+2. Turn on its SDK server: the **SDK Server** tab, then **Start Server**, or start OpenRGB with `--server`. Keep the default port, 6742.
+3. Leave OpenRGB running. Switchboard finds it within a few seconds and shows "RGB lighting" on the desktop app and the phone.
+
+Switchboard leaves your OpenRGB setup alone until you change a lighting control for the first time.
+
 ## Layout
 
 ```
