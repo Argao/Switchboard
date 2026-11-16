@@ -49,12 +49,7 @@ impl Displays {
             .await
             .unwrap_or_default();
             let mut c = self.cache.lock().unwrap();
-            // A monitor in standby often stops answering DDC and drops out of the
-            // scan. Keep it listed so the phone can still switch it back on.
-            let mut found = found;
-            let gone: Vec<Display> = c.list.iter().filter(|d| d.power == Some(false) && !found.iter().any(|f| f.id == d.id)).cloned().collect();
-            found.extend(gone);
-            c.list = found;
+            c.list = keep_standby(found, &c.list);
             c.scanned = Some(Instant::now());
         }
         // The backlight is cheap to read and changes from the keyboard too.
@@ -139,6 +134,15 @@ impl Displays {
         }
         Ok(())
     }
+}
+
+/// A monitor in standby often stops answering DDC and drops out of the scan.
+/// Keep the ones switched off from here listed, so the phone can still switch
+/// them back on.
+fn keep_standby(mut found: Vec<Display>, before: &[Display]) -> Vec<Display> {
+    let gone: Vec<Display> = before.iter().filter(|d| d.power == Some(false) && !found.iter().any(|f| f.id == d.id)).cloned().collect();
+    found.extend(gone);
+    found
 }
 
 /// Monitor name from an EDID block: the 0xFC display descriptor, else the
@@ -412,5 +416,37 @@ mod tests {
     fn percent_rounds() {
         assert_eq!(percent(60000, 120000), 50);
         assert_eq!(percent(1, 0), 0);
+    }
+
+    fn monitor(id: &str, kind: DisplayKind, power: Option<bool>) -> Display {
+        Display { id: id.into(), name: id.into(), kind, brightness: Some(50), contrast: None, power }
+    }
+
+    #[test]
+    fn standby_monitors_stay_listed() {
+        let before = [
+            monitor("ddc:1", DisplayKind::External, Some(false)),
+            monitor("ddc:2", DisplayKind::External, Some(true)),
+            monitor("ddc:3", DisplayKind::External, None),
+            monitor("ddc:4", DisplayKind::External, Some(false)),
+        ];
+        // Only 4 still answers, and reports itself on again.
+        let found = vec![monitor("ddc:4", DisplayKind::External, Some(true))];
+        let list = keep_standby(found, &before);
+        // 1 was switched off from here, so it stays; 2 and 3 were unplugged; 4 is listed once, as scanned.
+        assert_eq!(list, vec![monitor("ddc:4", DisplayKind::External, Some(true)), monitor("ddc:1", DisplayKind::External, Some(false))]);
+        assert_eq!(keep_standby(vec![], &[]), vec![]);
+    }
+
+    #[tokio::test]
+    async fn power_is_refused_for_unknown_and_built_in_displays() {
+        let d = Displays::default();
+        d.cache.lock().unwrap().list = vec![monitor("internal", DisplayKind::Internal, None)];
+        let e = d.set_power("ddc:9", false).await.unwrap_err();
+        assert!(e.to_string().contains("unknown display"), "{e}");
+        let e = d.set_power("internal", false).await.unwrap_err();
+        assert!(e.to_string().contains("built-in"), "{e}");
+        // A refused switch leaves what is shown alone.
+        assert_eq!(d.cache.lock().unwrap().list[0].power, None);
     }
 }
