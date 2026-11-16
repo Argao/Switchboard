@@ -7,16 +7,44 @@ Control your computer from your phone: volume, brightness and contrast for every
 Linux (x86_64), no root needed. This puts the app, its logo and a menu entry in your home folder:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/aiyu-ayaan/Switchboard/master/scripts/install-linux.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Argao/Switchboard/master/scripts/install-linux.sh | sh
 ```
 
-Add `-s -- --channel beta` for beta builds, `-s -- --version 0.0.1` for one release, or `-s -- --uninstall` to remove it. Run it again to update. The Windows installer, the `.deb` and the Android APK are on the [Releases](https://github.com/aiyu-ayaan/Switchboard/releases) page.
+Add `-s -- --channel beta` for beta builds, `-s -- --version 0.0.1` for one release, or `-s -- --uninstall` to remove it. Run it again to update. The Windows installer, the `.deb` and the Android APK are on the [Releases](https://github.com/Argao/Switchboard/releases) page.
+
+### Requirements
+
+To run the installed app. The desktop app bundles Electron and the daemon, so there is nothing to install for Node or Rust.
+
+**Linux (x86_64)**
+
+- `curl` or `wget`, and `sha256sum` (or `shasum`), used by the installer.
+- **FUSE 2 (`libfuse.so.2`)**: AppImages will not start without it (`dlopen(): error loading libfuse.so.2`).
+  - Debian/Ubuntu 24.04 and newer: `sudo apt install libfuse2t64` (older releases: `libfuse2`)
+  - Fedora: `sudo dnf install fuse-libs`
+  - Arch: `sudo pacman -S fuse2`
+- `systemd` (`loginctl`, `systemctl`) for lock, sleep, shutdown and restart, and a D-Bus session (media control through MPRIS).
+- PulseAudio or PipeWire with `pactl` (`pulseaudio-utils`, or `pipewire-pulse` plus `pulseaudio-utils`) for volume.
+- Monitor brightness and contrast (DDC/CI) need the I2C device nodes: `sudo modprobe i2c-dev`, then your user in the `i2c` group (`sudo usermod -aG i2c $USER`, log out and in). Keep it across reboots with `echo i2c-dev | sudo tee /etc/modules-load.d/i2c-dev.conf`.
+- A Secret Service (GNOME Keyring or KWallet) to store the pairing key.
+- An X11 session for keyboard and mouse input; on Wayland the clipboard works but input needs XWayland.
+
+**Windows 10 or 11 (x64)**
+
+- The installer from the [Releases](https://github.com/Argao/Switchboard/releases) page. Nothing else: audio, brightness (DDC/CI), media and power use what Windows already has.
+- A monitor with DDC/CI turned on in its own menu for brightness and contrast.
+- For the Apps area and total shutdown, run Switchboard as the same user that owns the windows (programs running as administrator can only be changed at the computer).
+
+**Both**
+
+- A phone on the same network (mDNS discovery), with the Android app.
+- Optional: [OpenRGB](https://openrgb.org) for the lighting controls (see below).
 
 ## RGB lighting
 
 The lighting controls (on/off, brightness, color, effects) need [OpenRGB](https://openrgb.org) on the computer; Switchboard draws the effects and OpenRGB talks to the hardware. Without it everything else works, and the lighting controls stay hidden.
 
-1. Install OpenRGB and check that it lists your devices.
+1. Install OpenRGB and check that it lists your devices. On Debian/Ubuntu: `sudo apt install openrgb` (it ships the udev rules, so devices work without root; replug USB devices or reboot after installing). To reach RAM and motherboard lighting over SMBus, also load the I2C module: `sudo modprobe i2c-dev`, and to keep it across reboots `echo i2c-dev | sudo tee /etc/modules-load.d/i2c-dev.conf`.
 2. Turn on its SDK server: the **SDK Server** tab, then **Start Server**, or start OpenRGB with `--server`. Keep the default port, 6742.
 3. Leave OpenRGB running. Switchboard finds it within a few seconds and shows "RGB lighting" on the desktop app and the phone.
 
@@ -49,6 +77,12 @@ development/    Docs submodule (architecture, pairing protocol, roadmap, commit 
 ```
 
 ## Develop
+
+Build requirements, on both systems: Node.js 20+ with pnpm (`corepack enable`), the Rust toolchain from `rust-toolchain.toml` (install it with [rustup](https://rustup.rs)), and Git with submodules (`git submodule update --init`).
+
+- **Linux**: a C compiler and `pkg-config` (the bundled SQLite is built from source): `sudo apt install build-essential pkg-config` (Fedora: `sudo dnf groupinstall "Development Tools"`). To package: `dpkg`, `fakeroot`, `rpm` for the `.deb`.
+- **Windows**: Visual Studio Build Tools 2022 with the "Desktop development with C++" workload (MSVC and the Windows SDK), and the `x86_64-pc-windows-msvc` Rust target (rustup's default there).
+- **Android app** (either system): JDK 17, Android SDK 37 (minSdk 26) and NDK, `cargo-ndk` (`cargo install cargo-ndk --locked`), the Android Rust targets (`rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android`), and `ANDROID_NDK_HOME`. Gradle comes from the wrapper.
 
 ```
 pnpm install
