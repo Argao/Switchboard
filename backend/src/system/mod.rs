@@ -9,6 +9,7 @@ pub mod power;
 pub mod rgb;
 pub mod stats;
 pub mod toggles;
+pub mod tuya;
 pub mod volume;
 pub mod windows;
 
