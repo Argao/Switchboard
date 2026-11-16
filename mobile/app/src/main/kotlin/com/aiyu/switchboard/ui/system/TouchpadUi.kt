@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Keyboard
@@ -51,14 +53,33 @@ import com.aiyu.switchboard.ui.kit.SectionCard
 import kotlinx.coroutines.delay
 
 /** Movement waiting to be sent: a finger can produce hundreds of events a second, the link needs far fewer. */
-private class Pending {
+internal class Pending {
     var dx = 0f
     var dy = 0f
-    var scroll = 0f
+
+    /** Finger travel not yet sent as wheel steps; positive scrolls down. */
+    private var scroll = 0f
+
+    /** Two fingers on the pad: dragging up scrolls down, as on a phone. */
+    fun twoFingerDrag(dy: Float) {
+        scroll -= dy
+    }
+
+    /** One finger on the side bar: sliding down scrolls down, as on a scrollbar. */
+    fun barDrag(dy: Float) {
+        scroll += dy
+    }
+
+    /** Whole wheel steps ready to send; what is left of a step stays for the next call. */
+    fun takeScrollSteps(): Int {
+        val steps = (scroll / SCROLL_STEP).toInt()
+        scroll -= steps * SCROLL_STEP
+        return steps
+    }
 }
 
-/** Pixels of two-finger drag per scroll step. */
-private const val SCROLL_STEP = 36f
+/** Pixels of finger travel per scroll step. */
+internal const val SCROLL_STEP = 36f
 private const val SPEED = 1.6f
 
 /** Home card: a way in when the computer allows it, else what to switch on. */
@@ -111,21 +132,18 @@ private fun Touchpad(conn: HostConnection) {
                 pending.dy -= dy
                 conn.post(Cmd.mouseMove(dx, dy))
             }
-            val steps = (pending.scroll / SCROLL_STEP).toInt()
-            if (steps != 0) {
-                pending.scroll -= steps * SCROLL_STEP
-                // Dragging up scrolls down, as on a phone.
-                conn.post(Cmd.scroll(0, -steps))
-            }
+            val steps = pending.takeScrollSteps()
+            if (steps != 0) conn.post(Cmd.scroll(0, steps))
         }
     }
     SectionCard {
-        PodHeader(Icons.Rounded.Mouse, "Touchpad", "Drag to move, tap to click, two fingers to scroll or right-click", shape = MaterialShapes.Cookie9Sided)
+        PodHeader(Icons.Rounded.Mouse, "Touchpad", "Drag to move, tap to click, two fingers to scroll or right-click, side bar to scroll", shape = MaterialShapes.Cookie9Sided)
         Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth().height(260.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
             Modifier
-                .fillMaxWidth()
-                .height(260.dp)
+                .weight(1f)
+                .fillMaxHeight()
                 .background(cs.surfaceContainerHighest, RoundedCornerShape(24.dp))
                 .border(1.dp, cs.outlineVariant, RoundedCornerShape(24.dp))
                 .pointerInput(conn) {
@@ -151,7 +169,7 @@ private fun Touchpad(conn: HostConnection) {
                             val travelled = (held[0].position - start).getDistance() > 10f
                             if (twoFingers) {
                                 val dy = held.map { it.position.y - it.previousPosition.y }.average().toFloat()
-                                pending.scroll += dy
+                                pending.twoFingerDrag(dy)
                                 if (travelled) moved = true
                             } else {
                                 val d: Offset = held[0].position - held[0].previousPosition
@@ -167,6 +185,37 @@ private fun Touchpad(conn: HostConnection) {
         ) {
             MonoCaption("touchpad")
         }
+        ScrollBar(pending)
+        }
+    }
+}
+
+/** A strip beside the pad: one finger sliding along it turns the wheel. */
+@Composable
+private fun ScrollBar(pending: Pending) {
+    val cs = MaterialTheme.colorScheme
+    Box(
+        Modifier
+            .width(44.dp)
+            .fillMaxHeight()
+            .background(cs.surfaceContainerHighest, RoundedCornerShape(22.dp))
+            .border(1.dp, cs.outlineVariant, RoundedCornerShape(22.dp))
+            .pointerInput(pending) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change == null || !change.pressed) break
+                        pending.barDrag(change.position.y - change.previousPosition.y)
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.width(4.dp).height(40.dp).background(cs.onSurfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(2.dp)))
     }
 }
 
