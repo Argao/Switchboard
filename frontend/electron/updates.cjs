@@ -2,7 +2,7 @@
 //   node frontend/electron/updates.cjs --check
 // The release workflow tags versions v2.0.0-alpha.1, v2.0.0-beta.1 and v2.0.0.
 
-const RELEASES = 'https://api.github.com/repos/aiyu-ayaan/Switchboard/releases?per_page=30'
+const RELEASES = 'https://api.github.com/repos/Argao/Switchboard/releases?per_page=30'
 const VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta)\.(\d+))?$/
 const STAGE = { alpha: 0, beta: 1, stable: 2 }
 
