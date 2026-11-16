@@ -276,17 +276,23 @@ export function TextField({ label, value, onChange, onEnter, maxLength }: { labe
 
 export function Dialog({ open, onClose, icon, title, children, actions }: { open: boolean; onClose: () => void; icon?: ReactNode; title: string; children: ReactNode; actions: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
+  // Kept in a ref so a caller passing a new function on every render does not
+  // re-run the effect below: that would move the focus to the first button on
+  // each keystroke in a field inside the dialog.
+  const close = useRef(onClose)
+  close.current = onClose
   useEffect(() => {
     if (!open) return
     const prev = document.activeElement as HTMLElement | null
-    ref.current?.querySelector<HTMLElement>('button')?.focus()
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    // A field to type in comes first; a dialog with none starts on its first button.
+    ref.current?.querySelector<HTMLElement>('input, button')?.focus()
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && close.current()
     window.addEventListener('keydown', esc)
     return () => {
       window.removeEventListener('keydown', esc)
       prev?.focus()
     }
-  }, [open, onClose])
+  }, [open])
   if (!open) return null
   return (
     <div className="fixed inset-0 z-sheet grid place-items-center bg-black/50 p-6" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
