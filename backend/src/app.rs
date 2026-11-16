@@ -127,6 +127,29 @@ impl App {
         }
     }
 
+    /// Start driving the RGB lighting, from where it was left, and keep what
+    /// the person picks stored.
+    pub fn start_rgb(self: &Arc<Self>) {
+        match self.store.rgb() {
+            Ok(Some(saved)) => self.system.rgb.load(&saved),
+            Ok(None) => {}
+            Err(e) => tracing::warn!("could not read the lighting settings: {e:#}"),
+        }
+        tokio::spawn(self.system.rgb.clone().run());
+        let app = self.clone();
+        tokio::spawn(async move {
+            let mut rx = app.system.rgb.watch();
+            while rx.changed().await.is_ok() {
+                // A slider sends many values; store the one it settles on.
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                let saved = serde_json::to_vec(&*rx.borrow_and_update());
+                if let Err(e) = saved.map_err(anyhow::Error::from).and_then(|b| app.store.set_rgb(&b)) {
+                    tracing::warn!("could not store the lighting settings: {e:#}");
+                }
+            }
+        });
+    }
+
     pub fn set_remote_input(&self, on: bool) -> anyhow::Result<()> {
         self.store.set_remote_input(on)?;
         self.system.remote_input.store(on, std::sync::atomic::Ordering::Relaxed);
