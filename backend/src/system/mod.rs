@@ -10,6 +10,7 @@ pub mod rgb;
 pub mod stats;
 pub mod toggles;
 pub mod volume;
+pub mod windows;
 
 use anyhow::{Result, anyhow};
 use switchboard_core::protocol::{Command, HostState};
@@ -39,16 +40,18 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 impl System {
     pub async fn snapshot(&self) -> HostState {
         let selected = self.player.lock().unwrap().clone();
-        let (volume, outputs, apps, displays, now, toggles) = tokio::join!(
+        let (volume, outputs, apps, displays, now, toggles, open) = tokio::join!(
             async { blocking(volume::get).await.ok().and_then(Result::ok) },
             async { blocking(mixer::outputs).await.ok().and_then(Result::ok).unwrap_or_default() },
             async { blocking(mixer::apps).await.ok().and_then(Result::ok).unwrap_or_default() },
             self.displays.list(),
             media::now_playing(selected),
             self.toggles(),
+            async { blocking(windows::list).await.ok().flatten() },
         );
         *self.art_url.lock().unwrap() = now.art_url;
-        HostState { volume, outputs, apps, displays, rgb: self.rgb.state(), media: now.media, players: now.players, toggles, remote_input: self.remote_input.load(std::sync::atomic::Ordering::Relaxed), stats: self.stats.sample() }
+        let (windows, screens) = open.map_or((None, Vec::new()), |(w, s)| (Some(w), s));
+        HostState { volume, outputs, apps, displays, rgb: self.rgb.state(), media: now.media, players: now.players, toggles, remote_input: self.remote_input.load(std::sync::atomic::Ordering::Relaxed), windows, screens, stats: self.stats.sample() }
     }
 
     async fn toggles(&self) -> Vec<switchboard_core::protocol::ToggleState> {
@@ -157,6 +160,18 @@ impl System {
                 let (c, t) = (self.clipboard.clone(), text.clone());
                 blocking(move || c.set(&t)).await?
             }
+            Command::CloseWindow { window } => {
+                let w = window.clone();
+                blocking(move || windows::close(&w)).await?
+            }
+            Command::KillApp { window } => {
+                let w = window.clone();
+                blocking(move || windows::kill(&w)).await?
+            }
+            Command::SetWindowFullscreen { window, screen, on } => {
+                let (w, s, on) = (window.clone(), screen.clone(), *on);
+                blocking(move || windows::fullscreen(&w, s.as_deref(), on)).await?
+            }
             Command::Power { action } => {
                 let a = *action;
                 blocking(move || power::run(a)).await?
@@ -216,6 +231,21 @@ mod tests {
             Command::SetRgbSpeed { level: 10 },
         ] {
             assert!(s.run(&cmd).await.is_err(), "{cmd:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn window_commands_need_a_real_window() {
+        let s = System::default();
+        for window in ["", "0", "not a number"] {
+            for cmd in [
+                Command::CloseWindow { window: window.into() },
+                Command::KillApp { window: window.into() },
+                Command::SetWindowFullscreen { window: window.into(), screen: None, on: true },
+                Command::SetWindowFullscreen { window: window.into(), screen: None, on: false },
+            ] {
+                assert!(s.run(&cmd).await.is_err(), "{cmd:?}");
+            }
         }
     }
 
