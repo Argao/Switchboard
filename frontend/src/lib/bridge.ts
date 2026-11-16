@@ -37,6 +37,18 @@ export interface Display {
   power: boolean | null
 }
 
+export type RgbEffect = 'static' | 'breathing' | 'rainbow' | 'rainbow_wave' | 'neon_shift'
+
+/** The computer's RGB lighting, drawn by the daemon through OpenRGB. */
+export interface RgbState {
+  on: boolean
+  brightness: number
+  effect: RgbEffect
+  /** `#rrggbb`, used by the static and breathing effects. */
+  color: string
+  speed: number
+}
+
 export interface AudioOutput {
   id: string
   name: string
@@ -74,6 +86,8 @@ export interface HostState {
   outputs: AudioOutput[]
   apps: AudioApp[]
   displays: Display[]
+  /** `null` when no OpenRGB server is running on this computer. */
+  rgb?: RgbState | null
   media: Media | null
   remote_input?: boolean
   players: { id: string; name: string; playing: boolean }[]
@@ -285,6 +299,11 @@ export type Control =
   | { type: 'set_brightness'; display: string; level: number }
   | { type: 'set_contrast'; display: string; level: number }
   | { type: 'set_display_power'; display: string; on: boolean }
+  | { type: 'set_rgb_power'; on: boolean }
+  | { type: 'set_rgb_brightness'; level: number }
+  | { type: 'set_rgb_effect'; effect: RgbEffect }
+  | { type: 'set_rgb_color'; color: string }
+  | { type: 'set_rgb_speed'; level: number }
   | { type: 'media'; action: 'play_pause' | 'next' | 'previous' }
   | { type: 'seek'; position: number }
   | { type: 'set_shuffle'; on: boolean }

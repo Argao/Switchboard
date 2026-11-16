@@ -1,7 +1,7 @@
-import { ArrowRight, BatteryCharging, Repeat, RepeatOnce, Shuffle, FolderOpen, PaperPlaneTilt, BatteryHigh, CircleHalf, Clock, Cpu, DeviceMobile, Fingerprint, Headphones, LockKey, Monitor, MusicNotes, Pause, Play, Power, QrCode, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, Sun } from '@phosphor-icons/react'
+import { ArrowRight, BatteryCharging, Repeat, RepeatOnce, Shuffle, FolderOpen, PaperPlaneTilt, BatteryHigh, CircleHalf, Clock, Cpu, DeviceMobile, Fingerprint, Headphones, Gauge, Lightbulb, LockKey, Monitor, MusicNotes, Pause, Play, Power, QrCode, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash, Sun } from '@phosphor-icons/react'
 import type { Route } from '@/components/Shell'
 import { Button, Ring, ShapeIcon, Slider, StatusDot, useToast } from '@/components/ui'
-import { bytes, clock, run, sb, timeAgo, useCover, useTransfers, useHostState, type Control, type Status } from '@/lib/bridge'
+import { bytes, clock, run, sb, timeAgo, useCover, useTransfers, useHostState, type Control, type RgbEffect, type Status } from '@/lib/bridge'
 import { cn } from '@/lib/cn'
 
 function greeting() {
@@ -28,6 +28,24 @@ function uptime(secs: number) {
   const m = Math.floor((secs % 3600) / 60)
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`
 }
+
+const rgbEffects: { id: RgbEffect; name: string }[] = [
+  { id: 'static', name: 'Solid color' },
+  { id: 'breathing', name: 'Breathing' },
+  { id: 'rainbow', name: 'Rainbow' },
+  { id: 'rainbow_wave', name: 'Rainbow wave' },
+  { id: 'neon_shift', name: 'Neon Shift' },
+]
+const rgbSwatches = [
+  { hex: '#ffffff', name: 'White' },
+  { hex: '#ff0000', name: 'Red' },
+  { hex: '#ff6a00', name: 'Orange' },
+  { hex: '#00ff40', name: 'Green' },
+  { hex: '#00d0ff', name: 'Cyan' },
+  { hex: '#0040ff', name: 'Blue' },
+  { hex: '#8000ff', name: 'Purple' },
+  { hex: '#ff0080', name: 'Pink' },
+]
 
 const tile = 'rise relative overflow-hidden rounded-3xl bg-panel p-5'
 const delay = (i: number) => ({ ['--i' as string]: i })
@@ -311,6 +329,59 @@ export function Home({ status, go }: { status: Status | null; go: (r: Route) => 
           )}
         </section>
       ))}
+      {/* RGB lighting, when OpenRGB is running. */}
+      {state?.rgb && (
+        <section className={cn(tile, 'col-span-12 flex flex-col gap-4 md:col-span-6 lg:col-span-4')} style={delay(9)}>
+          <div className="flex items-center gap-3">
+            <ShapeIcon icon={<Lightbulb size={22} weight="fill" />} shape="clover" tone={state.rgb.on ? 'primary' : 'neutral'} size={44} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-title font-medium">RGB lighting</p>
+              <p className="text-caption text-muted">{state.rgb.on ? rgbEffects.find((e) => e.id === state.rgb?.effect)?.name : 'Off'}</p>
+            </div>
+            <Button
+              variant={state.rgb.on ? 'tonal' : 'text'}
+              size="sm"
+              aria-label={`RGB lighting ${state.rgb.on ? 'turn off' : 'turn on'}`}
+              aria-pressed={state.rgb.on}
+              icon={<Power size={18} weight={state.rgb.on ? 'fill' : 'regular'} />}
+              onClick={() => act({ type: 'set_rgb_power', on: !state.rgb?.on })}
+            />
+          </div>
+          <Slider label="RGB brightness" icon={<Sun size={20} />} value={state.rgb.brightness} disabled={!state.rgb.on} onCommit={(level) => act({ type: 'set_rgb_brightness', level })} />
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="RGB effect">
+            {rgbEffects.map((e) => (
+              <Button key={e.id} role="radio" aria-checked={state.rgb?.effect === e.id} variant={state.rgb?.effect === e.id ? 'tonal' : 'outlined'} size="sm" onClick={() => act({ type: 'set_rgb_effect', effect: e.id })}>
+                {e.name}
+              </Button>
+            ))}
+          </div>
+          {/* Rainbow and Neon Shift bring their own colors. */}
+          {(state.rgb.effect === 'static' || state.rgb.effect === 'breathing') && (
+            <div className="flex gap-2" role="radiogroup" aria-label="RGB color">
+              {rgbSwatches.map((c) => {
+                const picked = state.rgb?.color.toLowerCase() === c.hex
+                return (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    role="radio"
+                    aria-checked={picked}
+                    aria-label={c.name}
+                    title={c.name}
+                    onClick={() => act({ type: 'set_rgb_color', color: c.hex })}
+                    className={cn('aspect-square min-w-0 flex-1 rounded-full border transition-transform hover:scale-105', picked ? 'border-primary ring-2 ring-primary' : 'border-border-strong')}
+                    style={{ backgroundColor: c.hex }}
+                  />
+                )
+              })}
+            </div>
+          )}
+          {/* A steady color has nothing to speed up. */}
+          {state.rgb.effect !== 'static' && (
+            <Slider label="RGB effect speed" icon={<Gauge size={20} />} value={state.rgb.speed} onCommit={(level) => act({ type: 'set_rgb_speed', level })} />
+          )}
+        </section>
+      )}
       {state && state.displays.length === 0 && (
         <section className={cn(tile, 'col-span-12 text-body text-muted')}>No controllable display found. External monitors need DDC/CI turned on in their own menu.</section>
       )}
