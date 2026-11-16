@@ -286,12 +286,54 @@ function quit() {
 // --- IPC --------------------------------------------------------------------
 
 const trusted = (e) => e.senderFrame && win && e.sender === win.webContents
-const ALLOWED = new Set(['status', 'pair_start', 'pair_cancel', 'forget', 'rename', 'state', 'run', 'history', 'set_remote_input', 'approve', 'set_auto_accept'])
+const ALLOWED = new Set(['status', 'pair_start', 'pair_cancel', 'forget', 'rename', 'state', 'run', 'history', 'set_remote_input', 'approve', 'set_auto_accept', 'plug', 'set_plug', 'forget_plug'])
 
 ipcMain.handle('sb:call', (e, cmd, args) => {
   if (!trusted(e) || !ALLOWED.has(cmd)) throw new Error('not allowed')
   return daemon.call(cmd, args)
 })
+// --- Smart plug, from the Smart Life account -----------------------------------
+//
+// The keys the account hands back stay in this process: the page is shown
+// the devices' names, picks one, and the key goes from here to the daemon.
+const tuya = require('./tuya.cjs')
+let smartLife = null
+// A sign-in left open (the window closed on it) is dropped after a while, keys and all.
+function setSmartLife(next) {
+  if (smartLife) clearTimeout(smartLife.timer)
+  smartLife = next
+  if (next) next.timer = setTimeout(() => setSmartLife(null), 10 * 60 * 1000)
+}
+
+ipcMain.handle('plug:login', async (e, userCode) => {
+  if (!trusted(e)) throw new Error('not allowed')
+  const token = await tuya.qrToken(userCode)
+  setSmartLife({ userCode, token, keys: new Map() })
+  return tuya.qrText(token)
+})
+// Asked again and again while the QR code is on screen: null until the person confirms in the app.
+ipcMain.handle('plug:devices', async (e) => {
+  if (!trusted(e)) throw new Error('not allowed')
+  if (!smartLife) throw new Error('Start again: the sign-in was closed')
+  const session = await tuya.loginResult(smartLife.token, smartLife.userCode)
+  if (!session) return null
+  const list = await tuya.devices(session)
+  smartLife.keys = new Map(list.map((d) => [d.id, d.key]))
+  return list.map(({ key, ...shown }) => shown)
+})
+ipcMain.handle('plug:use', async (e, id) => {
+  if (!trusted(e)) throw new Error('not allowed')
+  const key = smartLife && smartLife.keys.get(id)
+  if (!key) throw new Error('Start again: the sign-in was closed')
+  // No address: the daemon looks for the plug this key opens.
+  const plug = await daemon.call('set_plug', { key })
+  setSmartLife(null)
+  return plug
+})
+ipcMain.handle('plug:close', (e) => {
+  if (trusted(e)) setSmartLife(null)
+})
+
 // File paths come from the native dialog (or a real drop, seen by the
 // preload) here, never from the page, so a compromised renderer cannot make
 // the daemon offer an arbitrary file.

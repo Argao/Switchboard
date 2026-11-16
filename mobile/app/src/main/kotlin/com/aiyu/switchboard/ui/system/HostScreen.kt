@@ -184,6 +184,7 @@ fun HostScreen(vm: AppViewModel, id: String, onSwitch: () -> Unit, onOpen: (Sect
                 item(key = "input") { InputPod(s) { onOpen(Section.Input) } }
                 item(key = "bento") { ResourcesBento(s) { onOpen(Section.System) } }
                 item(key = "power") { PowerPod(scope.conn) }
+                s.totalShutdown?.let { t -> item(key = "total") { TotalShutdownPod(t, scope.conn) } }
             }
         }
     }

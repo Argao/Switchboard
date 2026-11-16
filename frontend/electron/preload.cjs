@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('switchboard', {
   installUpdate: () => ipcRenderer.invoke('update:install'),
   skipUpdate: () => ipcRenderer.invoke('update:skip'),
   setUpdateChannel: (channel) => ipcRenderer.invoke('update:set_channel', channel),
+  plugLogin: (userCode) => ipcRenderer.invoke('plug:login', userCode),
+  plugDevices: () => ipcRenderer.invoke('plug:devices'),
+  plugUse: (id) => ipcRenderer.invoke('plug:use', id),
+  plugClose: () => ipcRenderer.invoke('plug:close'),
   onEvent: (fn) => {
     const h = (_e, msg) => fn(msg)
     ipcRenderer.on('sb:event', h)

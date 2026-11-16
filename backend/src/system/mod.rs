@@ -9,6 +9,8 @@ pub mod power;
 pub mod rgb;
 pub mod stats;
 pub mod toggles;
+pub mod total;
+pub mod tuya;
 pub mod volume;
 pub mod windows;
 
@@ -19,6 +21,8 @@ use switchboard_core::protocol::{Command, HostState};
 pub struct System {
     pub displays: displays::Displays,
     pub rgb: rgb::Rgb,
+    /// Shutting down and cutting the power at the smart plug.
+    pub total: std::sync::Arc<total::Total>,
     stats: stats::Sampler,
     /// The player the user picked; `None` follows whichever is playing.
     player: std::sync::Mutex<Option<String>>,
@@ -51,7 +55,7 @@ impl System {
         );
         *self.art_url.lock().unwrap() = now.art_url;
         let (windows, screens) = open.map_or((None, Vec::new()), |(w, s)| (Some(w), s));
-        HostState { volume, outputs, apps, displays, rgb: self.rgb.state(), media: now.media, players: now.players, toggles, remote_input: self.remote_input.load(std::sync::atomic::Ordering::Relaxed), windows, screens, stats: self.stats.sample() }
+        HostState { volume, outputs, apps, displays, rgb: self.rgb.state(), media: now.media, players: now.players, toggles, remote_input: self.remote_input.load(std::sync::atomic::Ordering::Relaxed), windows, screens, total_shutdown: self.total.state(), stats: self.stats.sample() }
     }
 
     async fn toggles(&self) -> Vec<switchboard_core::protocol::ToggleState> {
@@ -172,6 +176,8 @@ impl System {
                 let (w, s, on) = (window.clone(), screen.clone(), *on);
                 blocking(move || windows::fullscreen(&w, s.as_deref(), on)).await?
             }
+            Command::TotalShutdown { delay, cut_after } => self.total.schedule(*delay, *cut_after).await,
+            Command::CancelTotalShutdown => self.total.cancel().await,
             Command::Power { action } => {
                 let a = *action;
                 blocking(move || power::run(a)).await?
@@ -247,6 +253,18 @@ mod tests {
                 assert!(s.run(&cmd).await.is_err(), "{cmd:?}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn total_shutdown_needs_a_plug() {
+        let s = System::default();
+        // Hidden from the phone, and refused if asked for anyway; the computer is not shut down.
+        assert_eq!(s.total.state(), None);
+        for delay in [0, 600] {
+            let e = s.run(&Command::TotalShutdown { delay, cut_after: Some(600) }).await.unwrap_err();
+            assert!(e.to_string().contains("No smart plug"), "{e}");
+        }
+        s.run(&Command::CancelTotalShutdown).await.unwrap();
     }
 
     #[tokio::test]

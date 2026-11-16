@@ -90,8 +90,40 @@ export interface HostState {
   rgb?: RgbState | null
   media: Media | null
   remote_input?: boolean
+  /** `null` when no smart plug is set up. */
+  total_shutdown?: TotalShutdown | null
   players: { id: string; name: string; playing: boolean }[]
   stats: { cpu: number; mem_used: number; mem_total: number; uptime: number; battery: { percent: number; charging: boolean } | null }
+}
+
+/** Shutting down and then cutting the power at the smart plug (backend/src/system/total.rs). */
+export interface TotalShutdown {
+  /** When the shutdown starts (Unix seconds), while one is scheduled. */
+  at: number | null
+  /** Seconds the plug waits, from the shutdown, before cutting the power. */
+  cut_after: number
+  cut_at: number | null
+  pending_update: boolean
+  error: string | null
+}
+
+/** The smart plug as the daemon reports it; its key never comes back. */
+export interface PlugView {
+  configured: boolean
+  host?: string
+  reachable?: boolean
+  on?: boolean
+  watts?: number | null
+  error?: string
+}
+
+/** A device of the Smart Life account that could be the plug. */
+export interface SmartLifeDevice {
+  id: string
+  name: string
+  /** A socket, as opposed to a lamp or a sensor. */
+  socket: boolean
+  online: boolean
 }
 
 export interface AppSettings {
@@ -138,6 +170,13 @@ interface Bridge {
   installUpdate(): Promise<string>
   skipUpdate(): Promise<void>
   setUpdateChannel(channel: UpdateChannel): Promise<void>
+  /** Starts a Smart Life sign-in; resolves to the text for the QR code. */
+  plugLogin(userCode: string): Promise<string>
+  /** The account's devices once the sign-in is confirmed in the app; null until then. */
+  plugDevices(): Promise<SmartLifeDevice[] | null>
+  /** Uses that device as the plug: the daemon finds it on the network. */
+  plugUse(id: string): Promise<PlugView>
+  plugClose(): Promise<void>
   onEvent(fn: (m: { event: string; data: unknown }) => void): () => void
   onNavigate(fn: (route: string) => void): () => void
 }

@@ -42,6 +42,10 @@ pub struct Store {
 pub trait Vault: Send + Sync {
     fn get(&self, host_id: &str) -> Result<Option<Vec<u8>>>;
     fn set(&self, host_id: &str, secret: &[u8]) -> Result<()>;
+    /// Forget a secret; one that was never there is not an error.
+    fn del(&self, _host_id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Secret Service (Linux) or Credential Manager (Windows). One entry per
@@ -61,13 +65,19 @@ impl Keychain {
         });
         rx.recv_timeout(std::time::Duration::from_secs(4)).unwrap_or_else(|_| anyhow::bail!("the keychain did not answer"))
     }
+
+    /// The host key's entry is named after the host id alone; other secrets
+    /// carry their own `kind:` in front (host ids have no colon).
+    fn entry(name: &str) -> String {
+        if name.contains(':') { name.to_owned() } else { format!("host-key:{name}") }
+    }
 }
 
 #[cfg(any(target_os = "linux", windows))]
 impl Vault for Keychain {
     fn get(&self, host_id: &str) -> Result<Option<Vec<u8>>> {
         let host_id = host_id.to_owned();
-        Self::off_runtime(move || match keyring::Entry::new("switchboard", &format!("host-key:{host_id}"))?.get_secret() {
+        Self::off_runtime(move || match keyring::Entry::new("switchboard", &Self::entry(&host_id))?.get_secret() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e.into()),
@@ -76,7 +86,15 @@ impl Vault for Keychain {
 
     fn set(&self, host_id: &str, secret: &[u8]) -> Result<()> {
         let (host_id, secret) = (host_id.to_owned(), secret.to_vec());
-        Self::off_runtime(move || Ok(keyring::Entry::new("switchboard", &format!("host-key:{host_id}"))?.set_secret(&secret)?))
+        Self::off_runtime(move || Ok(keyring::Entry::new("switchboard", &Self::entry(&host_id))?.set_secret(&secret)?))
+    }
+
+    fn del(&self, host_id: &str) -> Result<()> {
+        let host_id = host_id.to_owned();
+        Self::off_runtime(move || match keyring::Entry::new("switchboard", &Self::entry(&host_id))?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.into()),
+        })
     }
 }
 
@@ -240,6 +258,42 @@ impl Store {
         self.set_meta("rgb", saved)
     }
 
+    /// The smart plug this computer is plugged into: its address and its
+    /// local key. The key is a secret and goes to the OS keychain; with no
+    /// keychain it stays in the database, as the host key does.
+    pub fn plug(&self, host_id: &str) -> Result<Option<(String, String)>> {
+        let Some(host) = self.meta("plug")? else { return Ok(None) };
+        let key = match &self.vault {
+            Some(v) => v.get(&format!("plug-key:{host_id}"))?,
+            None => self.meta("plug_key")?,
+        };
+        Ok(key.map(|k| (String::from_utf8_lossy(&host).into_owned(), String::from_utf8_lossy(&k).into_owned())))
+    }
+
+    /// `None` forgets the plug and its key.
+    pub fn set_plug(&self, host_id: &str, plug: Option<(&str, &str)>) -> Result<()> {
+        let name = format!("plug-key:{host_id}");
+        match (plug, &self.vault) {
+            (Some((_, key)), Some(v)) => v.set(&name, key.as_bytes())?,
+            (Some((_, key)), None) => self.set_meta("plug_key", key.as_bytes())?,
+            (None, Some(v)) => v.del(&name)?,
+            (None, None) => self.del_meta("plug_key")?,
+        }
+        match plug {
+            Some((host, _)) => self.set_meta("plug", host.as_bytes()),
+            None => self.del_meta("plug"),
+        }
+    }
+
+    /// The total shutdown that is scheduled and its settings, as the JSON `system::total` wrote.
+    pub fn total(&self) -> Result<Option<Vec<u8>>> {
+        self.meta("total")
+    }
+
+    pub fn set_total(&self, saved: &[u8]) -> Result<()> {
+        self.set_meta("total", saved)
+    }
+
     /// Whether files phones send are taken without asking. On unless the person at the computer turned it off.
     pub fn auto_accept_files(&self) -> Result<bool> {
         Ok(self.meta("auto_accept_files")?.is_none_or(|v| v == b"1"))
@@ -347,6 +401,10 @@ mod tests {
             *self.0.lock().unwrap() = Some(s.to_vec());
             Ok(())
         }
+        fn del(&self, _: &str) -> Result<()> {
+            *self.0.lock().unwrap() = None;
+            Ok(())
+        }
     }
 
     #[test]
@@ -422,6 +480,29 @@ mod tests {
         assert!(s.remote_input().unwrap());
         s.set_remote_input(false).unwrap();
         assert!(!s.remote_input().unwrap());
+    }
+
+    #[test]
+    fn plug_is_kept_and_forgotten() {
+        // With a keychain the key lives there, not in the database.
+        let v = FakeVault::default();
+        let s = Store::memory_with(v.clone()).unwrap();
+        assert_eq!(s.plug("h").unwrap(), None);
+        s.set_plug("h", Some(("192.168.1.22", "0123456789abcdef"))).unwrap();
+        assert_eq!(s.plug("h").unwrap(), Some(("192.168.1.22".into(), "0123456789abcdef".into())));
+        assert_eq!(v.0.lock().unwrap().as_deref(), Some(&b"0123456789abcdef"[..]));
+        assert_eq!(s.meta("plug_key").unwrap(), None);
+        s.set_plug("h", None).unwrap();
+        assert_eq!(s.plug("h").unwrap(), None);
+        assert_eq!(*v.0.lock().unwrap(), None);
+
+        // Without one it stays in the database, and goes with the plug.
+        let s = Store::memory().unwrap();
+        s.set_plug("h", Some(("plug.lan:6668", "fedcba9876543210"))).unwrap();
+        assert_eq!(s.plug("h").unwrap(), Some(("plug.lan:6668".into(), "fedcba9876543210".into())));
+        s.set_plug("h", None).unwrap();
+        assert_eq!(s.plug("h").unwrap(), None);
+        assert_eq!(s.meta("plug_key").unwrap(), None);
     }
 
     #[test]

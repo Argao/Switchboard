@@ -122,6 +122,23 @@ pub fn run(action: PowerAction) -> Result<()> {
     Ok(())
 }
 
+/// Shut down without letting a program hold it up. For when the power is
+/// going to be cut anyway: a shutdown stuck on "this app is preventing
+/// shutdown" would leave the computer running when that happens.
+#[cfg(windows)]
+pub fn shut_down_forced() -> Result<()> {
+    // /f closes programs that do not close when asked; a plain /s waits on them.
+    let st = std::process::Command::new("shutdown").args(["/s", "/f", "/t", "0"]).status()?;
+    anyhow::ensure!(st.success(), "shutdown failed");
+    Ok(())
+}
+
+// shortcut: elsewhere the ordinary shutdown is used; inhibitors that can stall it are rare on a desktop session.
+#[cfg(not(windows))]
+pub fn shut_down_forced() -> Result<()> {
+    run(PowerAction::Shutdown)
+}
+
 #[cfg(not(any(target_os = "linux", windows)))]
 pub fn run(_: PowerAction) -> Result<()> {
     anyhow::bail!("unsupported platform")

@@ -150,6 +150,65 @@ impl App {
         });
     }
 
+    /// Bring back the smart plug and whatever total shutdown was scheduled,
+    /// run it when its time comes, and keep the schedule stored.
+    pub fn start_total(self: &Arc<Self>) {
+        let total = &self.system.total;
+        match self.store.plug(&self.host_id) {
+            Ok(Some((host, key))) => match crate::system::tuya::Plug::new(&host, &key) {
+                Ok(p) => total.set_plug(Some(p)),
+                Err(e) => tracing::warn!("the stored smart plug cannot be used: {e:#}"),
+            },
+            Ok(None) => {}
+            Err(e) => tracing::warn!("could not read the smart plug settings: {e:#}"),
+        }
+        match self.store.total() {
+            Ok(Some(saved)) => total.load(&saved),
+            Ok(None) => {}
+            Err(e) => tracing::warn!("could not read the total shutdown schedule: {e:#}"),
+        }
+        tokio::spawn(total.clone().run());
+        // Subscribed here, not in the task: a change made before the task first runs must still be stored.
+        let mut rx = total.watch();
+        let app = self.clone();
+        tokio::spawn(async move {
+            while rx.changed().await.is_ok() {
+                let saved = serde_json::to_vec(&*rx.borrow_and_update());
+                if let Err(e) = saved.map_err(anyhow::Error::from).and_then(|b| app.store.set_total(&b)) {
+                    tracing::warn!("could not store the total shutdown schedule: {e:#}");
+                }
+            }
+        });
+    }
+
+    /// Use this smart plug from now on. It has to answer with this key
+    /// first, so a mistyped address or key is caught here and not at night.
+    /// With no `host`, the network is searched for the plug the key belongs to.
+    pub async fn set_plug(&self, host: Option<&str>, key: &str) -> anyhow::Result<crate::system::tuya::PlugState> {
+        use crate::system::tuya;
+        let (host, plug) = match host.map(str::trim).filter(|h| !h.is_empty()) {
+            Some(h) => (h.to_owned(), tuya::Plug::new(h, key)?),
+            None => {
+                let own: Vec<std::net::Ipv4Addr> = lan_addresses().into_iter().filter_map(|a| match a {
+                    std::net::IpAddr::V4(a) => Some(a),
+                    std::net::IpAddr::V6(_) => None,
+                }).collect();
+                let (addr, plug) = tuya::find(tuya::neighbours(&own).into_iter().map(|a| format!("{a}:{}", tuya::PORT)).collect(), key).await?;
+                (addr.trim_end_matches(&format!(":{}", tuya::PORT)).to_owned(), plug)
+            }
+        };
+        let state = plug.state().await?;
+        self.store.set_plug(&self.host_id, Some((&host, key.trim())))?;
+        self.system.total.set_plug(Some(plug));
+        Ok(state)
+    }
+
+    pub fn forget_plug(&self) -> anyhow::Result<()> {
+        self.store.set_plug(&self.host_id, None)?;
+        self.system.total.set_plug(None);
+        Ok(())
+    }
+
     pub fn set_remote_input(&self, on: bool) -> anyhow::Result<()> {
         self.store.set_remote_input(on)?;
         self.system.remote_input.store(on, std::sync::atomic::Ordering::Relaxed);

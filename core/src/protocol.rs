@@ -130,6 +130,17 @@ pub enum Command {
     /// Put text on the computer's clipboard.
     ClipboardSet { text: String },
     Power { action: PowerAction },
+    /// Shut the computer down and have its smart plug cut the power a while
+    /// after. `delay` is seconds from now until the shutdown; 0 is at once.
+    /// `cut_after` is how many seconds the plug then waits; left out, it
+    /// waits what it was last told to.
+    TotalShutdown {
+        delay: u32,
+        #[serde(default)]
+        cut_after: Option<u32>,
+    },
+    /// Call off a total shutdown that is scheduled or under way.
+    CancelTotalShutdown,
     /// Close this window (an `AppWindow::id`) as its own close button does;
     /// the program may still ask what to do with unsaved work.
     CloseWindow { window: String },
@@ -308,7 +319,28 @@ pub struct HostState {
     /// The screens a window can be sent to.
     #[serde(default)]
     pub screens: Vec<Screen>,
+    /// `None` when the computer has no smart plug set up.
+    #[serde(default)]
+    pub total_shutdown: Option<TotalShutdown>,
     pub stats: Stats,
+}
+
+/// Shutting down and then cutting the power at the smart plug the computer
+/// is plugged into. The plug counts the delay by itself, since by then the
+/// computer is off.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TotalShutdown {
+    /// When the shutdown starts (Unix seconds), while one is scheduled.
+    pub at: Option<u64>,
+    /// Seconds the plug waits, from the shutdown, before it cuts the power.
+    pub cut_after: u32,
+    /// When the plug cuts the power (Unix seconds), once the shutdown has started.
+    pub cut_at: Option<u64>,
+    /// An update is waiting to install on shutdown, which can outlast the
+    /// plug's wait; a total shutdown is refused until it is done.
+    pub pending_update: bool,
+    /// Why the last total shutdown did not happen.
+    pub error: Option<String>,
 }
 
 /// One open window of a program on the computer.
@@ -571,6 +603,21 @@ mod tests {
         assert!(matches!(serde_json::from_str::<Event>(j).unwrap(), Event::State(s) if s.windows.is_none() && s.screens.is_empty()));
         let w = AppWindow { id: "7".into(), app: "firefox".into(), title: "Docs".into(), screen: None, fullscreen: true };
         assert_eq!(serde_json::to_string(&w).unwrap(), r#"{"id":"7","app":"firefox","title":"Docs","screen":null,"fullscreen":true}"#);
+    }
+
+    #[test]
+    fn total_shutdown_messages() {
+        let r: Request = serde_json::from_str(r#"{"id":1,"type":"total_shutdown","delay":1800}"#).unwrap();
+        assert_eq!(r.cmd, Command::TotalShutdown { delay: 1800, cut_after: None });
+        let r: Request = serde_json::from_str(r#"{"id":1,"type":"total_shutdown","delay":0,"cut_after":600}"#).unwrap();
+        assert_eq!(r.cmd, Command::TotalShutdown { delay: 0, cut_after: Some(600) });
+        let r: Request = serde_json::from_str(r#"{"id":2,"type":"cancel_total_shutdown"}"#).unwrap();
+        assert_eq!(r.cmd, Command::CancelTotalShutdown);
+        // An older host sends no `total_shutdown`; it reads as "no plug".
+        let j = r#"{"type":"state","volume":null,"displays":[],"media":null,"stats":{"cpu":0.0,"mem_used":0,"mem_total":0,"uptime":0,"battery":null}}"#;
+        assert!(matches!(serde_json::from_str::<Event>(j).unwrap(), Event::State(s) if s.total_shutdown.is_none()));
+        let t = TotalShutdown { at: Some(1794840000), cut_after: 300, cut_at: None, pending_update: false, error: None };
+        assert_eq!(serde_json::to_string(&t).unwrap(), r#"{"at":1794840000,"cut_after":300,"cut_at":null,"pending_update":false,"error":null}"#);
     }
 
     #[test]

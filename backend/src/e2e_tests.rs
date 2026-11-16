@@ -403,3 +403,37 @@ async fn uploads_wait_for_approval_when_auto_accept_is_off() {
     let (ok, ..) = ask(&mut ws, &mut s, 108, send("d")).await;
     assert!(ok);
 }
+
+#[tokio::test]
+async fn a_smart_plug_is_set_up_kept_and_forgotten() {
+    use crate::system::tuya::tests::{Device, KEY, device};
+    let (app, _) = start().await;
+    let key = std::str::from_utf8(KEY).unwrap();
+    let addr = device(*KEY, Arc::new(std::sync::Mutex::new(Device { on: true, ..Default::default() }))).await;
+
+    // A plug that does not answer to the key is not taken, and the phone is offered nothing.
+    assert!(app.set_plug(Some(&addr), "another key 1234").await.is_err());
+    assert_eq!(app.store.plug(&app.host_id).unwrap(), None);
+    assert_eq!(app.system.snapshot().await.total_shutdown, None);
+
+    assert!(app.set_plug(Some(&format!(" {addr} ")), key).await.unwrap().on);
+    assert_eq!(app.store.plug(&app.host_id).unwrap(), Some((addr.clone(), key.to_owned())));
+    let shown = app.system.snapshot().await.total_shutdown.unwrap();
+    assert_eq!((shown.at, shown.cut_after, shown.cut_at), (None, 300, None));
+
+    // Settings changed while running are stored, and come back.
+    app.start_total();
+    app.system.total.set_cut_after(120);
+    for _ in 0..50 {
+        if app.store.total().unwrap().is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let stored: crate::system::total::Saved = serde_json::from_slice(&app.store.total().unwrap().unwrap()).unwrap();
+    assert_eq!(stored, crate::system::total::Saved { at: None, cut_after: 120 });
+
+    app.forget_plug().unwrap();
+    assert_eq!(app.store.plug(&app.host_id).unwrap(), None);
+    assert_eq!(app.system.snapshot().await.total_shutdown, None);
+}

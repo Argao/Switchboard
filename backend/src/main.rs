@@ -80,6 +80,7 @@ async fn main() -> Result<()> {
     tracing::info!("listening on :{port}, data in {}", dir.display());
     app.advertise();
     app.start_rgb();
+    app.start_total();
     tokio::spawn(server::poll_state(app.clone()));
     app.emit("ready", app.status());
 
