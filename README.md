@@ -1,6 +1,6 @@
 # Switchboard
 
-Control your computer from your phone: volume, brightness and contrast for every monitor, media playback and power, over an end-to-end encrypted connection on your own network. No account, no password: pair once with a QR code or a short code.
+Control your computer from your phone: volume, brightness and contrast for every monitor, media playback, open apps and power, over an end-to-end encrypted connection on your own network. No account, no password: pair once with a QR code or a short code.
 
 ## Install
 
@@ -21,6 +21,10 @@ The lighting controls (on/off, brightness, color, effects) need [OpenRGB](https:
 3. Leave OpenRGB running. Switchboard finds it within a few seconds and shows "RGB lighting" on the desktop app and the phone.
 
 Switchboard leaves your OpenRGB setup alone until you change a lighting control for the first time.
+
+## Apps
+
+The phone lists the windows open on the computer and can close one, end its program, or make it cover a screen of your choice (and put it back). This works on Windows for now; on other systems the Apps area stays hidden. Programs running as administrator can only be changed at the computer.
 
 ## Layout
 
