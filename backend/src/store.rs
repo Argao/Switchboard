@@ -425,6 +425,15 @@ mod tests {
     }
 
     #[test]
+    fn lighting_is_kept() {
+        let s = Store::memory().unwrap();
+        assert_eq!(s.rgb().unwrap(), None);
+        s.set_rgb(b"{\"on\":true}").unwrap();
+        s.set_rgb(b"{\"on\":false}").unwrap();
+        assert_eq!(s.rgb().unwrap().as_deref(), Some(&b"{\"on\":false}"[..]));
+    }
+
+    #[test]
     fn device_lifecycle() {
         let s = Store::memory().unwrap();
         s.add_device("p1", "Pixel", &[9; 32]).unwrap();
