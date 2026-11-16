@@ -47,8 +47,23 @@ enum Cmd {
     History,
     /// The folder phones' uploads are saved to.
     Inbox,
+    /// Use the smart plug at this address, with this local key, for total
+    /// shutdowns. Answers with what the plug reports, having asked it.
+    SetPlug { host: Option<String>, key: String },
+    ForgetPlug,
+    /// Whether a plug is set up, and what it reports right now.
+    Plug,
     /// Run a control (brightness, volume, media) from the desktop itself.
     Run { command: Command },
+}
+
+/// The plug for the desktop's settings page. Never its key.
+fn plug_view(state: Option<anyhow::Result<crate::system::tuya::PlugState>>) -> Value {
+    match state {
+        None => json!({ "configured": false }),
+        Some(Ok(s)) => json!({ "configured": true, "reachable": true, "on": s.on, "watts": s.watts }),
+        Some(Err(e)) => json!({ "configured": true, "reachable": false, "error": format!("{e:#}") }),
+    }
 }
 
 async fn handle(app: &Arc<App>, cmd: Cmd) -> anyhow::Result<Value> {
@@ -107,6 +122,27 @@ async fn handle(app: &Arc<App>, cmd: Cmd) -> anyhow::Result<Value> {
             std::fs::create_dir_all(&app.inbox)?;
             json!(app.inbox)
         }
+        Cmd::SetPlug { host, key } => {
+            let s = app.set_plug(host.as_deref(), &key).await?;
+            app.poke.notify_one();
+            plug_view(Some(Ok(s)))
+        }
+        Cmd::ForgetPlug => {
+            app.forget_plug()?;
+            app.poke.notify_one();
+            Value::Null
+        }
+        Cmd::Plug => {
+            let mut v = match app.system.total.plug() {
+                Some(p) => plug_view(Some(p.state().await)),
+                None => plug_view(None),
+            };
+            // Where it is, for the settings page; never its key.
+            if let Some((host, _)) = app.store.plug(&app.host_id)? {
+                v["host"] = json!(host);
+            }
+            v
+        }
         Cmd::State => serde_json::to_value(app.system.snapshot().await)?,
         Cmd::Run { command } => {
             let data = app.system.run(&command).await?;
@@ -128,7 +164,7 @@ pub async fn run(app: Arc<App>) {
                 continue;
             }
         };
-        let slow = matches!(input.cmd, Cmd::State | Cmd::Run { .. } | Cmd::SendFiles { .. });
+        let slow = matches!(input.cmd, Cmd::State | Cmd::Run { .. } | Cmd::SendFiles { .. } | Cmd::SetPlug { .. } | Cmd::Plug);
         let app2 = app.clone();
         let reply = async move {
             let reply = match handle(&app2, input.cmd).await {
@@ -156,6 +192,28 @@ mod tests {
         let i: Input = serde_json::from_str(r#"{"id":7,"cmd":"forget","device":"abc"}"#).unwrap();
         assert_eq!(i.id, 7);
         assert!(matches!(i.cmd, Cmd::Forget { device } if device == "abc"));
+    }
+
+    #[test]
+    fn plug_lines_parse() {
+        let i: Input = serde_json::from_str(r#"{"id":3,"cmd":"set_plug","host":"192.168.1.22","key":"0123456789abcdef"}"#).unwrap();
+        assert!(matches!(i.cmd, Cmd::SetPlug { host: Some(host), key } if host == "192.168.1.22" && key.len() == 16));
+        // Without an address the network is searched.
+        let i: Input = serde_json::from_str(r#"{"id":3,"cmd":"set_plug","key":"0123456789abcdef"}"#).unwrap();
+        assert!(matches!(i.cmd, Cmd::SetPlug { host: None, .. }));
+        for cmd in ["plug", "forget_plug"] {
+            assert!(serde_json::from_str::<Input>(&format!(r#"{{"id":5,"cmd":"{cmd}"}}"#)).is_ok(), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn the_plug_is_shown_without_its_key() {
+        use crate::system::tuya::PlugState;
+        assert_eq!(plug_view(None), json!({ "configured": false }));
+        let v = plug_view(Some(Ok(PlugState { on: true, countdown: 0, watts: Some(52.5) })));
+        assert_eq!(v, json!({ "configured": true, "reachable": true, "on": true, "watts": 52.5 }));
+        let v = plug_view(Some(Err(anyhow::anyhow!("no answer"))));
+        assert_eq!(v, json!({ "configured": true, "reachable": false, "error": "no answer" }));
     }
 
     #[test]
