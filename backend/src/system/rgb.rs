@@ -167,6 +167,16 @@ impl Rgb {
     }
 }
 
+#[cfg(test)]
+impl Rgb {
+    /// As if an OpenRGB server with LEDs had been found.
+    pub(crate) fn found() -> Self {
+        let rgb = Self::default();
+        rgb.available.store(true, Ordering::Relaxed);
+        rgb
+    }
+}
+
 // --- Effects ----------------------------------------------------------------
 
 /// One loop of SignalRGB's Neon Shift (pink, purple, blue, light blue) at its
@@ -578,5 +588,110 @@ mod tests {
         let whole = controller(1, 6);
         assert_eq!(zones(&whole[..whole.len() - 1]), None);
         assert_eq!(zones(&[]), None);
+    }
+
+    #[test]
+    fn a_change_is_kept_and_takes_over_the_lights() {
+        let rgb = Rgb::found();
+        // Found, but untouched: shown to the phone, not yet driven.
+        assert_eq!(rgb.state(), Some(Saved::default().state));
+        assert!(!rgb.watch().borrow().managed);
+        rgb.change(|s| s.brightness = 40).unwrap();
+        assert_eq!(rgb.state().unwrap().brightness, 40);
+        assert!(rgb.watch().borrow().managed);
+    }
+
+    #[test]
+    fn off_and_out_of_range_values_stay_in_bounds() {
+        let r = Render::default();
+        // Brightness and speed beyond 100 count as 100, and a colour that cannot be read is white.
+        let loud = RgbState { brightness: 250, ..state(RgbEffect::Static) };
+        assert_eq!(r.at(&loud, 0.0), [255, 128, 0]);
+        let odd = RgbState { color: "nope".into(), ..state(RgbEffect::Static) };
+        assert_eq!(r.at(&odd, 0.0), [255, 255, 255]);
+        let mut fast = Render::default();
+        fast.advance(&RgbState { speed: 255, ..state(RgbEffect::Rainbow) }, 1.0);
+        assert_eq!(fast.phase, 2.0);
+        // Speed 0 still moves, slowly, rather than freezing the effect.
+        let mut slow = Render::default();
+        slow.advance(&RgbState { speed: 0, ..state(RgbEffect::Rainbow) }, 1.0);
+        assert!(slow.phase > 0.0);
+    }
+
+    /// A client joined to this end of a socket, standing in for the OpenRGB server.
+    async fn server() -> (Client, TcpStream) {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let s = TcpStream::connect(l.local_addr().unwrap()).await.unwrap();
+        let (server, _) = l.accept().await.unwrap();
+        (Client { s }, server)
+    }
+
+    /// The next packet the client sent: device, id, body.
+    async fn packet(s: &mut TcpStream) -> (u32, u32, Vec<u8>) {
+        let mut h = [0u8; 16];
+        s.read_exact(&mut h).await.unwrap();
+        assert_eq!(&h[..4], b"ORGB");
+        let n = |i: usize| u32::from_le_bytes(h[i..i + 4].try_into().unwrap());
+        let mut body = vec![0u8; n(12) as usize];
+        s.read_exact(&mut body).await.unwrap();
+        (n(4), n(8), body)
+    }
+
+    async fn answer(s: &mut TcpStream, device: u32, id: u32, body: &[u8]) {
+        let mut p = b"ORGB".to_vec();
+        for v in [device, id, body.len() as u32] {
+            p.extend_from_slice(&v.to_le_bytes());
+        }
+        p.extend_from_slice(body);
+        s.write_all(&p).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn paints_every_led_by_its_place_in_its_zone() {
+        let (mut c, mut s) = server().await;
+        let d = Device { index: 3, zones: vec![2, 1] };
+        c.paint(&d, &|pos| [(pos * 100.0) as u8, 1, 2]).await.unwrap();
+        let (device, id, body) = packet(&mut s).await;
+        assert_eq!((device, id), (3, UPDATE_LEDS));
+        let mut want = 18u32.to_le_bytes().to_vec();
+        want.extend_from_slice(&3u16.to_le_bytes());
+        // Two LEDs at 0 and halfway along the first zone, then the second zone starts again at 0.
+        want.extend_from_slice(&[0, 1, 2, 0, 50, 1, 2, 0, 0, 1, 2, 0]);
+        assert_eq!(body, want);
+    }
+
+    #[tokio::test]
+    async fn lists_controllers_past_unasked_notices() {
+        let (mut c, mut s) = server().await;
+        let fake = async {
+            assert_eq!(packet(&mut s).await, (0, REQUEST_CONTROLLER_COUNT, vec![]));
+            // "The device list changed", which nobody asked for, comes first.
+            answer(&mut s, 0, 100, &[]).await;
+            answer(&mut s, 0, REQUEST_CONTROLLER_COUNT, &3u32.to_le_bytes()).await;
+            for (index, data) in [controller(120, 125), controller(120, 7), vec![1, 2, 3]].into_iter().enumerate() {
+                // Each is asked for in protocol version 0.
+                assert_eq!(packet(&mut s).await, (index as u32, REQUEST_CONTROLLER_DATA, vec![0; 4]));
+                answer(&mut s, index as u32, REQUEST_CONTROLLER_DATA, &data).await;
+            }
+        };
+        let (found, ()) = tokio::join!(c.controllers(), fake);
+        let found = found.unwrap();
+        assert_eq!(
+            found,
+            vec![
+                Device { index: 0, zones: vec![5, 120] },
+                Device { index: 1, zones: vec![7] },
+                // A description that cannot be read is a device with no LEDs, not an error.
+                Device { index: 2, zones: vec![] },
+            ]
+        );
+        assert_eq!(found[2].leds(), 0);
+    }
+
+    #[tokio::test]
+    async fn refuses_a_server_that_is_not_openrgb() {
+        let (mut c, mut s) = server().await;
+        s.write_all(b"HTTP/1.1 400 Bad").await.unwrap();
+        assert!(c.reply(REQUEST_CONTROLLER_COUNT).await.is_err());
     }
 }

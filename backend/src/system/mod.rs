@@ -164,3 +164,65 @@ impl System {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use switchboard_core::protocol::RgbEffect;
+
+    fn lit() -> System {
+        System { rgb: rgb::Rgb::found(), ..Default::default() }
+    }
+
+    #[tokio::test]
+    async fn rgb_commands_change_the_lighting() {
+        let s = lit();
+        for cmd in [
+            Command::SetRgbPower { on: false },
+            Command::SetRgbEffect { effect: RgbEffect::RainbowWave },
+            // Levels past the end of the slider stop at 100.
+            Command::SetRgbBrightness { level: 180 },
+            Command::SetRgbSpeed { level: 101 },
+            // Stored the one way the phone shows it: lower case, with the `#`.
+            Command::SetRgbColor { color: "B30071".into() },
+        ] {
+            assert_eq!(s.run(&cmd).await.unwrap(), None, "{cmd:?}");
+        }
+        let now = s.rgb.state().unwrap();
+        assert!(!now.on);
+        assert_eq!(now.effect, RgbEffect::RainbowWave);
+        assert_eq!((now.brightness, now.speed), (100, 100));
+        assert_eq!(now.color, "#b30071");
+    }
+
+    #[tokio::test]
+    async fn a_bad_colour_is_refused_and_changes_nothing() {
+        let s = lit();
+        let e = s.run(&Command::SetRgbColor { color: "#red".into() }).await.unwrap_err();
+        assert!(e.to_string().contains("not a colour"), "{e}");
+        assert_eq!(s.rgb.state().unwrap().color, "#ffffff");
+        // Nothing was changed, so the lights are still left alone.
+        assert!(!s.rgb.watch().borrow().managed);
+    }
+
+    #[tokio::test]
+    async fn rgb_commands_fail_without_lighting() {
+        let s = System::default();
+        for cmd in [
+            Command::SetRgbPower { on: true },
+            Command::SetRgbBrightness { level: 10 },
+            Command::SetRgbEffect { effect: RgbEffect::Static },
+            Command::SetRgbColor { color: "#ffffff".into() },
+            Command::SetRgbSpeed { level: 10 },
+        ] {
+            assert!(s.run(&cmd).await.is_err(), "{cmd:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn display_power_needs_a_known_display() {
+        let s = System::default();
+        let e = s.run(&Command::SetDisplayPower { display: "ddc:9".into(), on: false }).await.unwrap_err();
+        assert!(e.to_string().contains("unknown display"), "{e}");
+    }
+}
