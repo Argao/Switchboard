@@ -125,6 +125,7 @@ fun SectionScreen(vm: AppViewModel, id: String, section: Section, onBack: () -> 
                     item { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { QuickSettings(s, scope.conn) } }
                     item { ClipboardCard(scope.conn) }
                     item { PowerPod(scope.conn) }
+                    s.totalShutdown?.let { t -> item { TotalShutdownPod(t, scope.conn) } }
                 }
             }
         }

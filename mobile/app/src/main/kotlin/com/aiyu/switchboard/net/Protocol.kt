@@ -69,6 +69,8 @@ sealed interface Event {
         val windows: List<AppWindow>? = null,
         /** The screens a window can be sent to. */
         val screens: List<Screen> = emptyList(),
+        /** Null when the computer has no smart plug set up. */
+        @SerialName("total_shutdown") val totalShutdown: TotalShutdown? = null,
         val stats: Stats = Stats(),
     ) : Event
 
@@ -97,6 +99,22 @@ data class Display(val id: String, val name: String, val kind: String, val brigh
 
 /** A screen as the computer lays windows out on it; not the same list as [Display]. */
 @Serializable data class Screen(val id: String, val name: String, val primary: Boolean = false, val width: Int = 0, val height: Int = 0)
+
+/**
+ * Shutting down and then cutting the power at the computer's smart plug.
+ * [at] is when the shutdown starts and [cutAt] when the plug cuts the power,
+ * both in Unix seconds; [cutAfter] is the plug's wait in seconds.
+ */
+@Serializable
+data class TotalShutdown(
+    val at: Long? = null,
+    @SerialName("cut_after") val cutAfter: Int = 300,
+    @SerialName("cut_at") val cutAt: Long? = null,
+    /** An update is waiting to install; a total shutdown is refused until it is done. */
+    @SerialName("pending_update") val pendingUpdate: Boolean = false,
+    /** Why the last one did not happen. */
+    val error: String? = null,
+)
 
 /** `dark_mode`, `do_not_disturb`, `wifi` or `bluetooth`; only the ones the computer supports are sent. */
 @Serializable data class ToggleState(val toggle: String, val on: Boolean)
@@ -167,6 +185,9 @@ object Cmd {
     fun clipboardGet() = obj("clipboard_get")
     fun clipboardSet(text: String) = obj("clipboard_set") { put("text", text) }
     fun power(action: String) = obj("power") { put("action", action) }
+    /** Shuts down [delay] seconds from now (0 is at once); the plug cuts the power [cutAfter] seconds later, or after its last wait when null. */
+    fun totalShutdown(delay: Int, cutAfter: Int? = null) = obj("total_shutdown") { put("delay", delay.coerceIn(0, 86_400)); if (cutAfter != null) put("cut_after", cutAfter.coerceIn(60, 1800)) }
+    fun cancelTotalShutdown() = obj("cancel_total_shutdown")
     /** Asks the window to close, as its own close button does. */
     fun closeWindow(window: String) = obj("close_window") { put("window", window) }
     /** Ends the window's program at once; unsaved work is lost. */
