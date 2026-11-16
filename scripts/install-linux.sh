@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install, update or remove the Switchboard desktop app on Linux (x86_64), for this user, no root.
 #
-#   curl -fsSL https://raw.githubusercontent.com/aiyu-ayaan/Switchboard/master/scripts/install-linux.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Argao/Switchboard/master/scripts/install-linux.sh | sh
 #   ... | sh -s -- --channel beta     beta builds (and stable ones)
 #   ... | sh -s -- --version 0.0.1    a specific release
 #   ... | sh -s -- --uninstall        remove it (paired phones stay in ~/.local/share/switchboard)
@@ -13,7 +13,7 @@
 # POSIX sh: it is piped into whatever `sh` is, which on Debian and Ubuntu is dash.
 set -eu
 
-API="${SWITCHBOARD_RELEASES_URL:-https://api.github.com/repos/aiyu-ayaan/Switchboard/releases?per_page=100}"
+API="${SWITCHBOARD_RELEASES_URL:-https://api.github.com/repos/Argao/Switchboard/releases?per_page=100}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 APP="$DATA_HOME/switchboard-desktop/Switchboard.AppImage"
@@ -171,6 +171,9 @@ mkdir -p "$(dirname "$BIN")"
 if [ ! -e "$BIN" ] || [ -L "$BIN" ]; then ln -sf "$APP" "$BIN"; fi
 
 echo "Switchboard $label is installed: find it in your applications menu, or run 'switchboard'."
-if [ ! -e /dev/fuse ]; then
-  echo "warning: FUSE is not available, so Switchboard unpacks itself on every start (slower). Install fuse3 with your package manager." >&2
+# An AppImage needs libfuse.so.2 (FUSE 2); fuse3 alone is not enough.
+if ! { command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; } || [ ! -e /dev/fuse ]; then
+  echo "warning: FUSE 2 (libfuse.so.2) is missing, so Switchboard will not start. Install it:" >&2
+  echo "  Debian/Ubuntu 24.04+: sudo apt install libfuse2t64    (older: libfuse2)" >&2
+  echo "  Fedora: sudo dnf install fuse-libs    Arch: sudo pacman -S fuse2" >&2
 fi

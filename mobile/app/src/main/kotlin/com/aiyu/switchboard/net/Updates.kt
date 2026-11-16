@@ -22,7 +22,7 @@ data class AppUpdate(val version: String, val url: String)
 
 /** Finds a newer APK among the GitHub releases (.github/workflows/release.yml names them `Switchboard-<version>.apk`). */
 object Updates {
-    private const val RELEASES = "https://api.github.com/repos/aiyu-ayaan/Switchboard/releases?per_page=30"
+    private const val RELEASES = "https://api.github.com/repos/Argao/Switchboard/releases?per_page=30"
     private val VERSION = Regex("""^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta)\.(\d+))?$""")
 
     // Its own client: the desktop one accepts any certificate, which GitHub must not get.

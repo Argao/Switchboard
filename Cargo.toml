@@ -6,7 +6,7 @@ members = ["backend", "core"]
 version = "0.0.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/aiyu-ayaan/Switchboard"
+repository = "https://github.com/Argao/Switchboard"
 authors = ["aiyu-ayaan"]
 
 [profile.release]

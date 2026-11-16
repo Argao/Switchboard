@@ -7,10 +7,10 @@
   "author": {
     "name": "aiyu-ayaan"
   },
-  "homepage": "https://github.com/aiyu-ayaan/Switchboard",
+  "homepage": "https://github.com/Argao/Switchboard",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aiyu-ayaan/Switchboard.git"
+    "url": "https://github.com/Argao/Switchboard.git"
   },
   "license": "MIT",
   "dependencies": {
