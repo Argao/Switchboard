@@ -58,6 +58,8 @@ sealed interface Event {
         val outputs: List<AudioOutput> = emptyList(),
         val apps: List<AudioApp> = emptyList(),
         val displays: List<Display> = emptyList(),
+        /** Null when the computer has no RGB lighting it can drive. */
+        val rgb: RgbState? = null,
         val media: Media? = null,
         val players: List<MediaPlayer> = emptyList(),
         val toggles: List<ToggleState> = emptyList(),
@@ -82,6 +84,9 @@ typealias HostState = Event.State
 data class Display(val id: String, val name: String, val kind: String, val brightness: Int? = null, val contrast: Int? = null, val power: Boolean? = null) {
     val external get() = kind == "external"
 }
+
+/** [effect] is "static", "breathing", "rainbow", "rainbow_wave" or "neon_shift"; [color] is `#rrggbb`. */
+@Serializable data class RgbState(val on: Boolean, val brightness: Int, val effect: String, val color: String, val speed: Int)
 
 /** `dark_mode`, `do_not_disturb`, `wifi` or `bluetooth`; only the ones the computer supports are sent. */
 @Serializable data class ToggleState(val toggle: String, val on: Boolean)
@@ -128,6 +133,11 @@ object Cmd {
     fun setBrightness(display: String, level: Int) = obj("set_brightness") { put("display", display); put("level", level.coerceIn(0, 100)) }
     fun setContrast(display: String, level: Int) = obj("set_contrast") { put("display", display); put("level", level.coerceIn(0, 100)) }
     fun setDisplayPower(display: String, on: Boolean) = obj("set_display_power") { put("display", display); put("on", on) }
+    fun setRgbPower(on: Boolean) = obj("set_rgb_power") { put("on", on) }
+    fun setRgbBrightness(level: Int) = obj("set_rgb_brightness") { put("level", level.coerceIn(0, 100)) }
+    fun setRgbEffect(effect: String) = obj("set_rgb_effect") { put("effect", effect) }
+    fun setRgbColor(color: String) = obj("set_rgb_color") { put("color", color) }
+    fun setRgbSpeed(level: Int) = obj("set_rgb_speed") { put("level", level.coerceIn(0, 100)) }
     fun media(action: String) = obj("media") { put("action", action) }
     fun seek(positionMs: Long) = obj("seek") { put("position", positionMs.coerceAtLeast(0)) }
     fun setShuffle(on: Boolean) = obj("set_shuffle") { put("on", on) }

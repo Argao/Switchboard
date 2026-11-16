@@ -109,6 +109,13 @@ fun SectionScreen(vm: AppViewModel, id: String, section: Section, onBack: () -> 
                     if (s.displays.size > 1) item { AllPanels(s, scope.conn) }
                     items(s.displays, key = { it.id }) { DisplayCard(it, scope.conn) }
                 }
+                Section.Rgb -> item {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        val rgb = s.rgb
+                        if (rgb == null) SectionCard { Text("No RGB lighting found. OpenRGB has to be running on the computer with its SDK server on.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        else RgbContent(rgb, scope.conn)
+                    }
+                }
                 Section.Files -> item { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { FilesContent(scope.conn, vm.connections.transfers, scope.host.id, vm.vault) } }
                 Section.Input -> item { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { TouchpadContent(s, scope.conn) } }
                 Section.System -> {
