@@ -74,6 +74,14 @@ pub enum Command {
     SetContrast { display: String, level: u8 },
     /// Switch one monitor on or off (DDC/CI standby); the built-in panel cannot.
     SetDisplayPower { display: String, on: bool },
+    /// Switch the computer's RGB lighting on or off; it comes back as it was.
+    SetRgbPower { on: bool },
+    SetRgbBrightness { level: u8 },
+    SetRgbEffect { effect: RgbEffect },
+    /// The colour the `Static` and `Breathing` effects use, as `#rrggbb`.
+    SetRgbColor { color: String },
+    /// How fast the moving effects run, 0 to 100.
+    SetRgbSpeed { level: u8 },
     Media { action: MediaAction },
     /// Jump to a point in the current track, in milliseconds.
     Seek { position: u64 },
@@ -267,6 +275,9 @@ pub struct HostState {
     #[serde(default)]
     pub apps: Vec<AudioApp>,
     pub displays: Vec<Display>,
+    /// `None` when the computer has no lighting this can drive.
+    #[serde(default)]
+    pub rgb: Option<RgbState>,
     pub media: Option<Media>,
     /// Every player that could be controlled, for switching between them.
     #[serde(default)]
@@ -324,6 +335,35 @@ pub struct Display {
     /// Whether the monitor is on; `None` when it cannot be switched from here.
     #[serde(default)]
     pub power: Option<bool>,
+}
+
+/// Lighting effects, drawn by the desktop so every device shows the same thing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RgbEffect {
+    /// One steady colour.
+    Static,
+    /// The colour fading in and out.
+    Breathing,
+    /// The whole colour wheel, in a loop.
+    Rainbow,
+    /// The colour wheel spread along each strip, and moving.
+    RainbowWave,
+    /// A loop of pink, purple and blue.
+    NeonShift,
+}
+
+/// The computer's RGB lighting: fans, strips, memory and the board itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RgbState {
+    pub on: bool,
+    /// 0 to 100.
+    pub brightness: u8,
+    pub effect: RgbEffect,
+    /// `#rrggbb`, used by `Static` and `Breathing`.
+    pub color: String,
+    /// 0 to 100, used by the moving effects.
+    pub speed: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -439,6 +479,17 @@ mod tests {
         // An older host sends no `power`; it reads as "cannot be switched".
         let d: Display = serde_json::from_str(r#"{"id":"ddc:0","name":"M","kind":"external","brightness":5,"contrast":null}"#).unwrap();
         assert_eq!(d.power, None);
+    }
+
+    #[test]
+    fn rgb_messages() {
+        let r: Request = serde_json::from_str(r#"{"id":1,"type":"set_rgb_effect","effect":"neon_shift"}"#).unwrap();
+        assert_eq!(r.cmd, Command::SetRgbEffect { effect: RgbEffect::NeonShift });
+        let r: Request = serde_json::from_str(r##"{"id":2,"type":"set_rgb_color","color":"#b30071"}"##).unwrap();
+        assert_eq!(r.cmd, Command::SetRgbColor { color: "#b30071".into() });
+        // An older host sends no `rgb`; it reads as "no lighting".
+        let j = r#"{"type":"state","volume":null,"displays":[],"media":null,"stats":{"cpu":0.0,"mem_used":0,"mem_total":0,"uptime":0,"battery":null}}"#;
+        assert!(matches!(serde_json::from_str::<Event>(j).unwrap(), Event::State(s) if s.rgb.is_none()));
     }
 
     #[test]

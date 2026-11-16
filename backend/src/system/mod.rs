@@ -6,6 +6,7 @@ pub mod input;
 pub mod media;
 pub mod mixer;
 pub mod power;
+pub mod rgb;
 pub mod stats;
 pub mod toggles;
 pub mod volume;
@@ -16,6 +17,7 @@ use switchboard_core::protocol::{Command, HostState};
 #[derive(Default)]
 pub struct System {
     pub displays: displays::Displays,
+    pub rgb: rgb::Rgb,
     stats: stats::Sampler,
     /// The player the user picked; `None` follows whichever is playing.
     player: std::sync::Mutex<Option<String>>,
@@ -46,7 +48,7 @@ impl System {
             self.toggles(),
         );
         *self.art_url.lock().unwrap() = now.art_url;
-        HostState { volume, outputs, apps, displays, media: now.media, players: now.players, toggles, remote_input: self.remote_input.load(std::sync::atomic::Ordering::Relaxed), stats: self.stats.sample() }
+        HostState { volume, outputs, apps, displays, rgb: self.rgb.state(), media: now.media, players: now.players, toggles, remote_input: self.remote_input.load(std::sync::atomic::Ordering::Relaxed), stats: self.stats.sample() }
     }
 
     async fn toggles(&self) -> Vec<switchboard_core::protocol::ToggleState> {
@@ -108,6 +110,14 @@ impl System {
             Command::SetBrightness { display, level } => self.displays.set(display, displays::VCP_BRIGHTNESS, *level).await,
             Command::SetContrast { display, level } => self.displays.set(display, displays::VCP_CONTRAST, *level).await,
             Command::SetDisplayPower { display, on } => self.displays.set_power(display, *on).await,
+            Command::SetRgbPower { on } => self.rgb.change(|s| s.on = *on),
+            Command::SetRgbBrightness { level } => self.rgb.change(|s| s.brightness = (*level).min(100)),
+            Command::SetRgbEffect { effect } => self.rgb.change(|s| s.effect = *effect),
+            Command::SetRgbColor { color } => {
+                let c = rgb::parse_color(color).ok_or_else(|| anyhow!("not a colour: {color}"))?;
+                self.rgb.change(|s| s.color = rgb::hex(c))
+            }
+            Command::SetRgbSpeed { level } => self.rgb.change(|s| s.speed = (*level).min(100)),
             Command::Media { action } => media::control(selected(), *action).await,
             Command::Seek { position } => media::seek(selected(), *position).await,
             Command::SetShuffle { on } => media::set_shuffle(selected(), *on).await,

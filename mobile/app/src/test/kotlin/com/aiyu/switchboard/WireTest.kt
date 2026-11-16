@@ -5,6 +5,7 @@ import com.aiyu.switchboard.data.parsePairUri
 import com.aiyu.switchboard.net.Cmd
 import com.aiyu.switchboard.net.Event
 import com.aiyu.switchboard.net.FILE_CHUNK
+import com.aiyu.switchboard.net.RgbState
 import com.aiyu.switchboard.net.ServerHello
 import com.aiyu.switchboard.net.lost
 import com.aiyu.switchboard.net.magicPacket
@@ -122,6 +123,17 @@ class WireTest {
         assertEquals(0x0F.toByte(), p.last())
         assertEquals(null, magicPacket("nope"))
         assertEquals(listOf("255.255.255.255", "192.168.1.255"), wakeTargets(listOf("192.168.1.15", "pc.local")))
+    }
+
+    @Test fun rgbState() {
+        val s = WireJson.decodeFromString(
+            Event.serializer(),
+            """{"type":"state","volume":null,"displays":[],"rgb":{"on":true,"brightness":80,"effect":"neon_shift","color":"#b30071","speed":50},"media":null,"stats":{"cpu":0.0,"mem_used":0,"mem_total":0,"uptime":0,"battery":null}}""",
+        ) as Event.State
+        assertEquals(RgbState(true, 80, "neon_shift", "#b30071", 50), s.rgb)
+        assertEquals("""{"type":"set_rgb_brightness","level":100}""", Cmd.setRgbBrightness(140).toString())
+        assertEquals("""{"type":"set_rgb_effect","effect":"rainbow"}""", Cmd.setRgbEffect("rainbow").toString())
+        assertEquals("""{"type":"set_rgb_color","color":"#ff0080"}""", Cmd.setRgbColor("#ff0080").toString())
     }
 
     @Test fun commandShape() {

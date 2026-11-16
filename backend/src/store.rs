@@ -231,6 +231,15 @@ impl Store {
         self.set_meta("remote_input", if on { b"1" } else { b"0" })
     }
 
+    /// The lighting the person chose last, as the JSON `system::rgb` wrote.
+    pub fn rgb(&self) -> Result<Option<Vec<u8>>> {
+        self.meta("rgb")
+    }
+
+    pub fn set_rgb(&self, saved: &[u8]) -> Result<()> {
+        self.set_meta("rgb", saved)
+    }
+
     /// Whether files phones send are taken without asking. On unless the person at the computer turned it off.
     pub fn auto_accept_files(&self) -> Result<bool> {
         Ok(self.meta("auto_accept_files")?.is_none_or(|v| v == b"1"))
