@@ -130,6 +130,19 @@ pub enum Command {
     /// Put text on the computer's clipboard.
     ClipboardSet { text: String },
     Power { action: PowerAction },
+    /// Close this window (an `AppWindow::id`) as its own close button does;
+    /// the program may still ask what to do with unsaved work.
+    CloseWindow { window: String },
+    /// End the program this window belongs to at once. Unsaved work is lost.
+    KillApp { window: String },
+    /// Make this window cover the whole of a screen (a `Screen::id`; the one
+    /// it is on when left out), or put it back the way it was.
+    SetWindowFullscreen {
+        window: String,
+        #[serde(default)]
+        screen: Option<String>,
+        on: bool,
+    },
     Ping,
     /// The phone forgot this desktop; the desktop drops it too.
     Unpair,
@@ -288,7 +301,38 @@ pub struct HostState {
     /// Whether the computer lets phones use its keyboard and mouse.
     #[serde(default)]
     pub remote_input: bool,
+    /// The open windows, front to back; `None` when this computer cannot
+    /// manage them.
+    #[serde(default)]
+    pub windows: Option<Vec<AppWindow>>,
+    /// The screens a window can be sent to.
+    #[serde(default)]
+    pub screens: Vec<Screen>,
     pub stats: Stats,
+}
+
+/// One open window of a program on the computer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppWindow {
+    pub id: String,
+    /// The program it belongs to.
+    pub app: String,
+    pub title: String,
+    /// The `Screen::id` it is on.
+    pub screen: Option<String>,
+    /// Whether it was made to cover its screen from here.
+    pub fullscreen: bool,
+}
+
+/// A screen as the desktop lays windows out on it. Not the same list as
+/// `Display`, which is the panels whose brightness can be driven.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Screen {
+    pub id: String,
+    pub name: String,
+    pub primary: bool,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -509,6 +553,24 @@ mod tests {
         assert_eq!(r.cmd, Command::Key { key: KeyName::PageDown, ctrl: true, alt: false, shift: false, meta: false });
         let r: Request = serde_json::from_str(r#"{"id":3,"type":"mouse_button","button":"right","action":"click"}"#).unwrap();
         assert_eq!(r.cmd, Command::MouseButton { button: MouseButton::Right, action: ButtonAction::Click });
+    }
+
+    #[test]
+    fn window_messages() {
+        let r: Request = serde_json::from_str(r#"{"id":1,"type":"close_window","window":"66312"}"#).unwrap();
+        assert_eq!(r.cmd, Command::CloseWindow { window: "66312".into() });
+        let r: Request = serde_json::from_str(r#"{"id":2,"type":"kill_app","window":"66312"}"#).unwrap();
+        assert_eq!(r.cmd, Command::KillApp { window: "66312".into() });
+        let r: Request = serde_json::from_str(r#"{"id":3,"type":"set_window_fullscreen","window":"7","screen":"\\\\.\\DISPLAY2","on":true}"#).unwrap();
+        assert_eq!(r.cmd, Command::SetWindowFullscreen { window: "7".into(), screen: Some(r"\\.\DISPLAY2".into()), on: true });
+        // Leaving full screen names no screen.
+        let r: Request = serde_json::from_str(r#"{"id":4,"type":"set_window_fullscreen","window":"7","on":false}"#).unwrap();
+        assert_eq!(r.cmd, Command::SetWindowFullscreen { window: "7".into(), screen: None, on: false });
+        // An older host sends no `windows`; it reads as "cannot manage windows", not as "nothing open".
+        let j = r#"{"type":"state","volume":null,"displays":[],"media":null,"stats":{"cpu":0.0,"mem_used":0,"mem_total":0,"uptime":0,"battery":null}}"#;
+        assert!(matches!(serde_json::from_str::<Event>(j).unwrap(), Event::State(s) if s.windows.is_none() && s.screens.is_empty()));
+        let w = AppWindow { id: "7".into(), app: "firefox".into(), title: "Docs".into(), screen: None, fullscreen: true };
+        assert_eq!(serde_json::to_string(&w).unwrap(), r#"{"id":"7","app":"firefox","title":"Docs","screen":null,"fullscreen":true}"#);
     }
 
     #[test]
