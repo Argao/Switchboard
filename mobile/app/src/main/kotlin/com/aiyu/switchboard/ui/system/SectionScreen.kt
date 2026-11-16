@@ -116,6 +116,7 @@ fun SectionScreen(vm: AppViewModel, id: String, section: Section, onBack: () -> 
                         else RgbContent(rgb, scope.conn)
                     }
                 }
+                Section.Apps -> item { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { AppsContent(s, scope.conn) } }
                 Section.Files -> item { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { FilesContent(scope.conn, vm.connections.transfers, scope.host.id, vm.vault) } }
                 Section.Input -> item { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { TouchpadContent(s, scope.conn) } }
                 Section.System -> {

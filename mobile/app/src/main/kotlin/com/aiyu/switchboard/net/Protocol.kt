@@ -65,6 +65,10 @@ sealed interface Event {
         val toggles: List<ToggleState> = emptyList(),
         /** True when the person at the computer has allowed phones to use its keyboard and mouse. */
         @SerialName("remote_input") val remoteInput: Boolean = false,
+        /** The open windows, front to back. Null when the computer cannot manage them. */
+        val windows: List<AppWindow>? = null,
+        /** The screens a window can be sent to. */
+        val screens: List<Screen> = emptyList(),
         val stats: Stats = Stats(),
     ) : Event
 
@@ -87,6 +91,12 @@ data class Display(val id: String, val name: String, val kind: String, val brigh
 
 /** [effect] is "static", "breathing", "rainbow", "rainbow_wave" or "neon_shift"; [color] is `#rrggbb`. */
 @Serializable data class RgbState(val on: Boolean, val brightness: Int, val effect: String, val color: String, val speed: Int)
+
+/** One open window; [screen] is the [Screen.id] it is on. */
+@Serializable data class AppWindow(val id: String, val app: String, val title: String, val screen: String? = null, val fullscreen: Boolean = false)
+
+/** A screen as the computer lays windows out on it; not the same list as [Display]. */
+@Serializable data class Screen(val id: String, val name: String, val primary: Boolean = false, val width: Int = 0, val height: Int = 0)
 
 /** `dark_mode`, `do_not_disturb`, `wifi` or `bluetooth`; only the ones the computer supports are sent. */
 @Serializable data class ToggleState(val toggle: String, val on: Boolean)
@@ -157,6 +167,12 @@ object Cmd {
     fun clipboardGet() = obj("clipboard_get")
     fun clipboardSet(text: String) = obj("clipboard_set") { put("text", text) }
     fun power(action: String) = obj("power") { put("action", action) }
+    /** Asks the window to close, as its own close button does. */
+    fun closeWindow(window: String) = obj("close_window") { put("window", window) }
+    /** Ends the window's program at once; unsaved work is lost. */
+    fun killApp(window: String) = obj("kill_app") { put("window", window) }
+    /** Covers [screen] with the window (the screen it is on when null), or puts it back. */
+    fun setWindowFullscreen(window: String, screen: String?, on: Boolean) = obj("set_window_fullscreen") { put("window", window); if (screen != null) put("screen", screen); put("on", on) }
     fun unpair() = obj("unpair")
     fun fileSend(xfer: String, name: String, size: Long) = obj("file_send") { put("xfer", xfer); put("name", name); put("size", size) }
     fun fileChunk(xfer: String, offset: Long, data: String) = obj("file_chunk") { put("xfer", xfer); put("offset", offset); put("data", data) }
