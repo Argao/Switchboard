@@ -6,8 +6,11 @@
 //! is taken off and it is sized to the screen, the way browsers do it for
 //! themselves. What it looked like before is kept, to put it back.
 //!
-//! Only Windows for now. Elsewhere `list` answers `None` and the phone hides
-//! the whole area.
+//! It also opens streaming sites the way a television remote's button does:
+//! the default browser, a window of its own, full screen on a chosen screen.
+//!
+//! Only Windows for now. Elsewhere `list` answers `None`, `streams` is empty
+//! and the phone hides the whole area.
 
 use anyhow::{Result, anyhow};
 use switchboard_core::protocol::{AppWindow, Screen};
@@ -54,14 +57,34 @@ pub fn parse_id(id: &str) -> Result<isize> {
     id.parse::<isize>().ok().filter(|&h| h != 0).ok_or_else(|| anyhow!("not a window: {id}"))
 }
 
-pub use imp::{close, fullscreen, kill, list};
+/// How a browser is asked for a window of its own, so that going full
+/// screen does not take the person's other tabs along. Chromium browsers
+/// and Firefox both take `--new-window`.
+pub fn browser_args(url: &str) -> [String; 2] {
+    ["--new-window".into(), url.into()]
+}
+
+/// The name the browser's windows will be listed under, from the program
+/// that opens links. Opera registers a launcher that starts the real one.
+pub fn browser_app(exe: &str) -> String {
+    let name = app_name(exe);
+    if name.eq_ignore_ascii_case("launcher") { "opera".into() } else { name }
+}
+
+/// The streaming sites this computer can open in full screen.
+pub fn streams() -> Vec<switchboard_core::protocol::Stream> {
+    if cfg!(windows) { switchboard_core::protocol::Stream::ALL.to_vec() } else { Vec::new() }
+}
+
+pub use imp::{close, fullscreen, kill, list, open_url};
 
 #[cfg(windows)]
 mod imp {
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::ffi::c_void;
     use std::sync::{LazyLock, Mutex};
+    use std::time::{Duration, Instant};
 
     use windows::Win32::Devices::Display::{
         DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
@@ -71,14 +94,15 @@ mod imp {
     use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
     use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MONITORINFOEXW, MonitorFromWindow};
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW, TerminateProcess};
-    use windows::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_KEYUP, VK_MENU, keybd_event};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_KEYUP, VK_F11, VK_MENU, keybd_event};
+    use windows::Win32::UI::Shell::{ASSOCF_NONE, ASSOCSTR_EXECUTABLE, AssocQueryStringW};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumChildWindows, EnumWindows, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowPlacement, GetWindowTextW, GetWindowThreadProcessId,
-        HWND_TOP, IsIconic, IsWindow, IsWindowVisible, IsZoomed, MONITORINFOF_PRIMARY, PostMessageW, SW_RESTORE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+        EnumChildWindows, EnumWindows, GW_OWNER, GetForegroundWindow, GWL_EXSTYLE, GWL_STYLE, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowPlacement, GetWindowTextW, GetWindowThreadProcessId,
+        HWND_TOP, IsIconic, IsWindow, IsWindowVisible, IsZoomed, MONITORINFOF_PRIMARY, PostMessageW, SW_MAXIMIZE, SW_RESTORE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
         SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, ShowWindow, WINDOWPLACEMENT, WM_CLOSE, WS_CAPTION, WS_EX_CLIENTEDGE,
         WS_EX_DLGMODALFRAME, WS_EX_STATICEDGE, WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE, WS_MAXIMIZE, WS_MINIMIZE, WS_THICKFRAME,
     };
-    use windows::core::PWSTR;
+    use windows::core::{PWSTR, w};
 
     const REFUSED: &str = "Windows would not allow it. A program running as administrator can only be changed at the computer.";
 
@@ -382,6 +406,83 @@ mod imp {
         Ok(())
     }
 
+    /// The program that opens web links for this person.
+    fn default_browser() -> Result<String> {
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        // SAFETY: the buffer is passed with its length, and the strings are constants.
+        unsafe { AssocQueryStringW(ASSOCF_NONE, ASSOCSTR_EXECUTABLE, w!("https"), w!("open"), PWSTR(buf.as_mut_ptr()), &mut len) }.ok().map_err(|_| anyhow!("No web browser is set as the default on this computer"))?;
+        let exe = text(&buf);
+        anyhow::ensure!(!exe.is_empty(), "No web browser is set as the default on this computer");
+        Ok(exe)
+    }
+
+    /// How long a browser is given to show its new window.
+    const BROWSER_WAIT: Duration = Duration::from_secs(20);
+
+    /// Opens `url` in the default browser, in a window of its own, and puts
+    /// that window in full screen on `screen` (where it opens, when `None`).
+    ///
+    /// Answers as soon as the browser is started; the window is waited for
+    /// aside, since a browser that was not running takes a while to show one.
+    pub fn open_url(url: &str, screen: Option<&str>) -> Result<()> {
+        let to = match screen {
+            Some(s) => Some(monitors().into_iter().find(|m| m.id == s).ok_or_else(|| anyhow!("That screen is no longer connected"))?),
+            None => None,
+        };
+        let exe = default_browser()?;
+        // The browser hands the address to the one already running, so the
+        // new window is told from the old ones by not having been there.
+        let before: HashSet<isize> = handles().into_iter().map(|h| h.0 as isize).collect();
+        std::process::Command::new(&exe).args(browser_args(url)).spawn().map_err(|e| anyhow!("The browser could not be started: {e}"))?;
+        let (app, url) = (browser_app(&exe), url.to_owned());
+        std::thread::spawn(move || {
+            let until = Instant::now() + BROWSER_WAIT;
+            while Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(200));
+                let new = handles().into_iter().find(|&h| !before.contains(&(h.0 as isize)) && listable(&facts(h)) && owner(h).1.eq_ignore_ascii_case(&app));
+                if let Some(h) = new {
+                    // Let it finish drawing itself before it is moved.
+                    std::thread::sleep(Duration::from_millis(400));
+                    present(h, to.as_ref());
+                    return;
+                }
+            }
+            tracing::warn!("the browser showed no new window for {url}");
+        });
+        Ok(())
+    }
+
+    /// Moves a browser window to a screen and has the browser itself go full
+    /// screen (F11), which hides its tabs and address bar. The key only goes
+    /// to the window in front; when the desktop will not bring this one
+    /// there, it is made to cover the screen from outside instead.
+    fn present(h: HWND, to: Option<&Monitor>) {
+        // SAFETY: plain calls on a window handle; a stale one only makes them fail.
+        unsafe {
+            if let Some(m) = to {
+                // A maximised window does not move, and one maximised again
+                // lands on the screen it was moved to.
+                if IsIconic(h).as_bool() || IsZoomed(h).as_bool() {
+                    let _ = ShowWindow(h, SW_RESTORE);
+                }
+                let r = &m.rect;
+                let _ = SetWindowPos(h, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+                let _ = ShowWindow(h, SW_MAXIMIZE);
+            }
+            focus(h);
+            std::thread::sleep(Duration::from_millis(300));
+            if GetForegroundWindow() == h {
+                keybd_event(VK_F11.0 as u8, 0, Default::default(), 0);
+                keybd_event(VK_F11.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+                return;
+            }
+        }
+        if let Err(e) = fullscreen(&(h.0 as isize).to_string(), to.map(|m| m.id.as_str()), true) {
+            tracing::warn!("could not put the browser in full screen: {e:#}");
+        }
+    }
+
     /// Drives a real window on this desktop, so it is run by hand:
     /// `cargo test --bins -- --ignored windows`.
     #[cfg(test)]
@@ -495,6 +596,9 @@ mod imp {
     pub fn fullscreen(_: &str, _: Option<&str>, _: bool) -> Result<()> {
         Err(anyhow!(NO))
     }
+    pub fn open_url(_: &str, _: Option<&str>) -> Result<()> {
+        Err(anyhow!("Opening streaming sites is not available on this computer yet"))
+    }
 }
 
 #[cfg(test)]
@@ -527,6 +631,16 @@ mod tests {
         assert_eq!(app_name("/opt/app-1.2"), "app-1.2");
         assert_eq!(app_name(""), "Unknown");
         assert_eq!(app_name(".exe"), "Unknown");
+    }
+
+    #[test]
+    fn a_stream_gets_a_browser_window_of_its_own() {
+        assert_eq!(browser_args("https://www.netflix.com/browse"), ["--new-window", "https://www.netflix.com/browse"]);
+        assert_eq!(browser_app(r"C:\Program Files\Google\Chrome\Application\chrome.exe"), "chrome");
+        assert_eq!(browser_app(r"C:\Program Files\Mozilla Firefox\firefox.exe"), "firefox");
+        // Opera's links go to a launcher; its windows belong to `opera.exe`.
+        assert_eq!(browser_app(r"C:\Users\me\AppData\Local\Programs\Opera\launcher.exe"), "opera");
+        assert_eq!(streams().is_empty(), !cfg!(windows));
     }
 
     #[test]

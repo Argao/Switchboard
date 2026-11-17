@@ -55,7 +55,7 @@ impl System {
         );
         *self.art_url.lock().unwrap() = now.art_url;
         let (windows, screens) = open.map_or((None, Vec::new()), |(w, s)| (Some(w), s));
-        HostState { volume, outputs, apps, displays, rgb: self.rgb.state(), media: now.media, players: now.players, toggles, remote_input: self.remote_input.load(std::sync::atomic::Ordering::Relaxed), windows, screens, total_shutdown: self.total.state(), stats: self.stats.sample() }
+        HostState { volume, outputs, apps, displays, rgb: self.rgb.state(), media: now.media, players: now.players, toggles, remote_input: self.remote_input.load(std::sync::atomic::Ordering::Relaxed), windows, screens, streams: windows::streams(), total_shutdown: self.total.state(), stats: self.stats.sample() }
     }
 
     async fn toggles(&self) -> Vec<switchboard_core::protocol::ToggleState> {
@@ -176,6 +176,10 @@ impl System {
                 let (w, s, on) = (window.clone(), screen.clone(), *on);
                 blocking(move || windows::fullscreen(&w, s.as_deref(), on)).await?
             }
+            Command::OpenStream { stream, screen } => {
+                let (url, s) = (stream.url(), screen.clone());
+                blocking(move || windows::open_url(url, s.as_deref())).await?
+            }
             Command::TotalShutdown { delay, cut_after } => self.total.schedule(*delay, *cut_after).await,
             Command::CancelTotalShutdown => self.total.cancel().await,
             Command::Power { action } => {
@@ -253,6 +257,14 @@ mod tests {
                 assert!(s.run(&cmd).await.is_err(), "{cmd:?}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_stream_opens_only_on_a_screen_that_exists() {
+        use switchboard_core::protocol::Stream;
+        let s = System::default();
+        // Refused before any browser is started, here and where it is not supported at all.
+        assert!(s.run(&Command::OpenStream { stream: Stream::Netflix, screen: Some("no such screen".into()) }).await.is_err());
     }
 
     #[tokio::test]
