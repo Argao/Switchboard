@@ -154,6 +154,14 @@ pub enum Command {
         screen: Option<String>,
         on: bool,
     },
+    /// Open a streaming site in the computer's default browser, in a window
+    /// of its own, in full screen on a screen (a `Screen::id`; wherever the
+    /// browser puts the window when left out).
+    OpenStream {
+        stream: Stream,
+        #[serde(default)]
+        screen: Option<String>,
+    },
     Ping,
     /// The phone forgot this desktop; the desktop drops it too.
     Unpair,
@@ -251,6 +259,55 @@ pub struct ToggleState {
     pub on: bool,
 }
 
+/// Streaming sites the computer can open, as a television remote's buttons
+/// do. The phone names one and the computer knows where it lives, so a
+/// phone cannot make the computer open an address of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Stream {
+    Netflix,
+    PrimeVideo,
+    DisneyPlus,
+    HboMax,
+    Youtube,
+    Globoplay,
+    AppleTv,
+    ParamountPlus,
+    Crunchyroll,
+    Twitch,
+}
+
+impl Stream {
+    pub const ALL: [Stream; 10] = [
+        Stream::Netflix,
+        Stream::PrimeVideo,
+        Stream::DisneyPlus,
+        Stream::HboMax,
+        Stream::Youtube,
+        Stream::Globoplay,
+        Stream::AppleTv,
+        Stream::ParamountPlus,
+        Stream::Crunchyroll,
+        Stream::Twitch,
+    ];
+
+    /// The page the site starts on.
+    pub fn url(self) -> &'static str {
+        match self {
+            Stream::Netflix => "https://www.netflix.com/browse",
+            Stream::PrimeVideo => "https://www.primevideo.com/",
+            Stream::DisneyPlus => "https://www.disneyplus.com/",
+            Stream::HboMax => "https://play.hbomax.com/",
+            Stream::Youtube => "https://www.youtube.com/",
+            Stream::Globoplay => "https://globoplay.globo.com/",
+            Stream::AppleTv => "https://tv.apple.com/",
+            Stream::ParamountPlus => "https://www.paramountplus.com/",
+            Stream::Crunchyroll => "https://www.crunchyroll.com/",
+            Stream::Twitch => "https://www.twitch.tv/",
+        }
+    }
+}
+
 /// Longest clipboard text that travels in one frame, in bytes.
 pub const MAX_CLIPBOARD: usize = 256 * 1024;
 
@@ -319,6 +376,10 @@ pub struct HostState {
     /// The screens a window can be sent to.
     #[serde(default)]
     pub screens: Vec<Screen>,
+    /// The streaming sites this computer can open in full screen; empty
+    /// when it cannot.
+    #[serde(default)]
+    pub streams: Vec<Stream>,
     /// `None` when the computer has no smart plug set up.
     #[serde(default)]
     pub total_shutdown: Option<TotalShutdown>,
@@ -603,6 +664,23 @@ mod tests {
         assert!(matches!(serde_json::from_str::<Event>(j).unwrap(), Event::State(s) if s.windows.is_none() && s.screens.is_empty()));
         let w = AppWindow { id: "7".into(), app: "firefox".into(), title: "Docs".into(), screen: None, fullscreen: true };
         assert_eq!(serde_json::to_string(&w).unwrap(), r#"{"id":"7","app":"firefox","title":"Docs","screen":null,"fullscreen":true}"#);
+    }
+
+    #[test]
+    fn stream_messages() {
+        let r: Request = serde_json::from_str(r#"{"id":1,"type":"open_stream","stream":"prime_video","screen":"\\\\.\\DISPLAY2"}"#).unwrap();
+        assert_eq!(r.cmd, Command::OpenStream { stream: Stream::PrimeVideo, screen: Some(r"\\.\DISPLAY2".into()) });
+        let r: Request = serde_json::from_str(r#"{"id":2,"type":"open_stream","stream":"netflix"}"#).unwrap();
+        assert_eq!(r.cmd, Command::OpenStream { stream: Stream::Netflix, screen: None });
+        // A site is named, never an address.
+        assert!(serde_json::from_str::<Request>(r#"{"id":3,"type":"open_stream","stream":"https://example.com"}"#).is_err());
+        assert_eq!(serde_json::to_string(&Stream::ALL).unwrap(), r#"["netflix","prime_video","disney_plus","hbo_max","youtube","globoplay","apple_tv","paramount_plus","crunchyroll","twitch"]"#);
+        for s in Stream::ALL {
+            assert!(s.url().starts_with("https://"), "{s:?}");
+        }
+        // An older host sends no `streams`; it reads as "cannot open any".
+        let j = r#"{"type":"state","volume":null,"displays":[],"media":null,"stats":{"cpu":0.0,"mem_used":0,"mem_total":0,"uptime":0,"battery":null}}"#;
+        assert!(matches!(serde_json::from_str::<Event>(j).unwrap(), Event::State(s) if s.streams.is_empty()));
     }
 
     #[test]
