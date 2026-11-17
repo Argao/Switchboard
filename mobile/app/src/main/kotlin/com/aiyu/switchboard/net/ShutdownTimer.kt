@@ -11,12 +11,15 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.widget.RemoteViews
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.aiyu.switchboard.App
 import com.aiyu.switchboard.MainActivity
+import com.aiyu.switchboard.R
 import com.aiyu.switchboard.ui.system.clockText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -124,23 +127,35 @@ object ShutdownTimer {
         val zone = ZoneId.systemDefault()
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         fun action(what: String) = broadcast(context, intent(context, what, hostId, hostName, at, cutAfter))
+        val title = if (warning) warningTitle(hostName) else timerTitle(hostName, at, zone)
+        val body = timerBody(at, cutAfter, zone)
+        // The time left is what this is for, so it is drawn large, ahead of the words. A
+        // chronometer runs on the time since boot, and Android keeps it counting with the app gone.
+        val zero = SystemClock.elapsedRealtime() + (at * 1000 - System.currentTimeMillis())
+        fun views(layout: Int, withBody: Boolean) = RemoteViews(context.packageName, layout).apply {
+            setChronometerCountDown(R.id.shutdown_chronometer, true)
+            setChronometer(R.id.shutdown_chronometer, zero, null, true)
+            setTextViewText(R.id.shutdown_title, title)
+            if (withBody) setTextViewText(R.id.shutdown_text, body)
+        }
         return NotificationCompat.Builder(context, if (warning) WARNING else TIMER)
             .setSmallIcon(android.R.drawable.ic_lock_power_off)
-            .setContentTitle(if (warning) warningTitle(hostName) else timerTitle(hostName, at, zone))
-            .setContentText(timerBody(at, cutAfter, zone))
-            // Android counts down to the shutdown by itself, with the app gone.
+            // For what does not draw the layouts below: a watch, a screen reader.
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(views(R.layout.notification_shutdown_timer, withBody = false))
+            .setCustomBigContentView(views(R.layout.notification_shutdown_timer_big, withBody = true))
+            .setCustomHeadsUpContentView(views(R.layout.notification_shutdown_timer, withBody = false))
             .setWhen(at * 1000)
-            .setShowWhen(true)
-            .setUsesChronometer(true)
-            .setChronometerCountDown(true)
+            // The large one says it; a second, small one in the header would only repeat it.
+            .setShowWhen(false)
             .setOngoing(true)
             .setOnlyAlertOnce(!warning)
             .setPriority(if (warning) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
             .setCategory(if (warning) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_STOPWATCH)
             // The computer is off by then; nothing is left to tell this to go.
             .setTimeoutAfter(((at - now).coerceAtLeast(1)) * 1000)
-            // Android 16 and later: a live update, in the status bar and on the lock screen like the clock's own timer.
-            .setRequestPromotedOngoing(true)
             .addExtras(Bundle().apply { putLong(AT, at) })
             .setContentIntent(PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), flags))
             .addAction(0, "Postpone 30 min", action(POSTPONE_IT))
