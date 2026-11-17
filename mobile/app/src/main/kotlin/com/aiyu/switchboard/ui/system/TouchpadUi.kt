@@ -249,6 +249,7 @@ private val SPECIAL = listOf(
     "Esc" to "escape", "Tab" to "tab", "Enter" to "enter", "⌫" to "backspace", "Del" to "delete",
     "←" to "left", "↑" to "up", "↓" to "down", "→" to "right",
     "Home" to "home", "End" to "end", "PgUp" to "page_up", "PgDn" to "page_down",
+    "F5" to "f5",
 )
 
 private val SHORTCUTS = listOf("Copy" to 'c', "Paste" to 'v', "Cut" to 'x', "All" to 'a', "Undo" to 'z', "Find" to 'f')
