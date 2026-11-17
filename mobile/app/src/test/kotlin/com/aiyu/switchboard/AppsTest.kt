@@ -8,6 +8,7 @@ import com.aiyu.switchboard.net.WireJson
 import com.aiyu.switchboard.ui.system.appsSummary
 import com.aiyu.switchboard.ui.system.screenDetail
 import com.aiyu.switchboard.ui.system.screenOf
+import com.aiyu.switchboard.ui.system.streamBrand
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -44,6 +45,20 @@ class AppsTest {
         // No screen named: the one it is on, or none needed to leave full screen.
         assertEquals("""{"type":"set_window_fullscreen","window":"7","on":true}""", Cmd.setWindowFullscreen("7", null, true).toString())
         assertEquals("""{"type":"set_window_fullscreen","window":"7","on":false}""", Cmd.setWindowFullscreen("7", null, false).toString())
+    }
+
+    @Test fun streams() {
+        assertEquals(listOf("netflix", "prime_video"), state(""""streams":["netflix","prime_video"],""").streams)
+        // An older computer, or one that cannot open them, offers none.
+        assertEquals(emptyList<String>(), state("").streams)
+        assertEquals("""{"type":"open_stream","stream":"netflix","screen":"\\\\.\\DISPLAY2"}""", Cmd.openStream("netflix", side.id).toString())
+        assertEquals("""{"type":"open_stream","stream":"netflix"}""", Cmd.openStream("netflix", null).toString())
+        assertEquals("Prime Video", streamBrand("prime_video").name)
+        // One this app has not heard of is named from its id, and still has something to show.
+        val unknown = streamBrand("pluto_tv")
+        assertEquals("Pluto Tv", unknown.name)
+        assertEquals("Pl", unknown.letters)
+        assertNull(unknown.icon)
     }
 
     @Test fun summaryCountsWindowsAndApps() {

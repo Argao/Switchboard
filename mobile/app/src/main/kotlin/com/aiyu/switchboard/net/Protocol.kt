@@ -69,6 +69,8 @@ sealed interface Event {
         val windows: List<AppWindow>? = null,
         /** The screens a window can be sent to. */
         val screens: List<Screen> = emptyList(),
+        /** The streaming sites the computer can open in full screen, by id ("netflix", "prime_video"); empty when it cannot. */
+        val streams: List<String> = emptyList(),
         /** Null when the computer has no smart plug set up. */
         @SerialName("total_shutdown") val totalShutdown: TotalShutdown? = null,
         val stats: Stats = Stats(),
@@ -194,6 +196,8 @@ object Cmd {
     fun killApp(window: String) = obj("kill_app") { put("window", window) }
     /** Covers [screen] with the window (the screen it is on when null), or puts it back. */
     fun setWindowFullscreen(window: String, screen: String?, on: Boolean) = obj("set_window_fullscreen") { put("window", window); if (screen != null) put("screen", screen); put("on", on) }
+    /** Opens a streaming site (one of [Event.State.streams]) in the computer's browser, full screen on [screen], or wherever the browser opens when null. */
+    fun openStream(stream: String, screen: String?) = obj("open_stream") { put("stream", stream); if (screen != null) put("screen", screen) }
     fun unpair() = obj("unpair")
     fun fileSend(xfer: String, name: String, size: Long) = obj("file_send") { put("xfer", xfer); put("name", name); put("size", size) }
     fun fileChunk(xfer: String, offset: Long, data: String) = obj("file_chunk") { put("xfer", xfer); put("offset", offset); put("data", data) }

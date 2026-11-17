@@ -179,7 +179,7 @@ fun HostScreen(vm: AppViewModel, id: String, onSwitch: () -> Unit, onOpen: (Sect
                 item(key = "audio") { AudioPod(s, scope.conn) { onOpen(Section.Audio) } }
                 if (s.displays.isNotEmpty()) item(key = "displays") { DisplaysPod(s, scope.conn) { onOpen(Section.Displays) } }
                 s.rgb?.let { rgb -> item(key = "rgb") { RgbPod(rgb, scope.conn) { onOpen(Section.Rgb) } } }
-                s.windows?.let { open -> item(key = "apps") { AppsPod(open) { onOpen(Section.Apps) } } }
+                if (s.windows != null || s.streams.isNotEmpty()) item(key = "apps") { AppsPod(s.windows.orEmpty(), s.streams.size) { onOpen(Section.Apps) } }
                 item(key = "files") { FilesPod(scope.conn, vm.connections.transfers, scope.host.id) { onOpen(Section.Files) } }
                 item(key = "input") { InputPod(s) { onOpen(Section.Input) } }
                 item(key = "bento") { ResourcesBento(s) { onOpen(Section.System) } }
