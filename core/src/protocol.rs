@@ -238,6 +238,7 @@ pub enum KeyName {
     Down,
     Left,
     Right,
+    F5,
 }
 
 /// Longest text one `TypeText` may carry, in characters.
@@ -644,6 +645,8 @@ mod tests {
         assert_eq!(r.cmd, Command::MouseMove { dx: -3, dy: 8 });
         let r: Request = serde_json::from_str(r#"{"id":2,"type":"key","key":"page_down","ctrl":true}"#).unwrap();
         assert_eq!(r.cmd, Command::Key { key: KeyName::PageDown, ctrl: true, alt: false, shift: false, meta: false });
+        let r: Request = serde_json::from_str(r#"{"id":4,"type":"key","key":"f5"}"#).unwrap();
+        assert_eq!(r.cmd, Command::Key { key: KeyName::F5, ctrl: false, alt: false, shift: false, meta: false });
         let r: Request = serde_json::from_str(r#"{"id":3,"type":"mouse_button","button":"right","action":"click"}"#).unwrap();
         assert_eq!(r.cmd, Command::MouseButton { button: MouseButton::Right, action: ButtonAction::Click });
     }

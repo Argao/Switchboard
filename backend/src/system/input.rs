@@ -35,6 +35,7 @@ fn key(k: KeyName) -> Key {
         KeyName::Down => Key::DownArrow,
         KeyName::Left => Key::LeftArrow,
         KeyName::Right => Key::RightArrow,
+        KeyName::F5 => Key::F5,
     }
 }
 
@@ -131,5 +132,10 @@ mod tests {
         assert_eq!(clamp_move(3, -4), (3, -4));
         assert!(check_text(&"a".repeat(1000)).is_ok());
         assert!(check_text(&"a".repeat(1001)).is_err());
+    }
+
+    #[test]
+    fn f5_is_the_f5_key() {
+        assert_eq!(key(KeyName::F5), Key::F5);
     }
 }
