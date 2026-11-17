@@ -9,11 +9,15 @@ import com.aiyu.switchboard.data.SavedHost
 import com.aiyu.switchboard.data.Vault
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -41,6 +45,8 @@ class Connections(context: Context, val vault: Vault) {
     private val _live = MutableStateFlow<Map<String, HostConnection>>(emptyMap())
     val live: StateFlow<Map<String, HostConnection>> = _live.asStateFlow()
     private var running = false
+    /** One per computer, keeping its scheduled total shutdown in the notification shade. */
+    private val shutdownWatchers = mutableMapOf<String, Job>()
 
     val deviceName: String = Settings.Global.getString(context.contentResolver, "device_name")?.takeIf { it.isNotBlank() }
         ?: "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
@@ -73,7 +79,22 @@ class Connections(context: Context, val vault: Vault) {
             scope,
             onWelcome = { name, os, macs -> rename(h.id, name, os, macs) },
             onOffer = { offered(h.id, it) },
-        )
+        ).also { watchShutdown(h.id, it) }
+    }
+
+    /**
+     * Follows the total shutdown [conn] reports, so its countdown stays in the
+     * shade after the app is left. The first state after every reconnect goes
+     * through too, which is what corrects a shade that went stale meanwhile.
+     */
+    private fun watchShutdown(id: String, conn: HostConnection) {
+        val job = scope.launch {
+            conn.state.filterNotNull().map { it.totalShutdown }.distinctUntilChangedBy { it?.at }.collect { t ->
+                val name = vault.data.value.hosts.find { it.id == id }?.name ?: conn.target.name
+                ShutdownTimer.sync(appContext, id, name, t)
+            }
+        }
+        synchronized(shutdownWatchers) { shutdownWatchers.put(id, job) }?.cancel()
     }
 
     /** A computer offered a file: take it if the user said to, otherwise ask with a notification. */
@@ -134,6 +155,8 @@ class Connections(context: Context, val vault: Vault) {
             c.stop()
         }
         synchronized(this) { conns.remove(id) }
+        synchronized(shutdownWatchers) { shutdownWatchers.remove(id) }?.cancel()
+        ShutdownTimer.clear(appContext, id)
         publish()
         vault.update { d ->
             val hosts = d.hosts.filterNot { it.id == id }
@@ -159,6 +182,7 @@ class Connections(context: Context, val vault: Vault) {
                     conns.remove(host.id)?.takeIf { it !== conn }?.stop()
                     conns[host.id] = conn
                 }
+                watchShutdown(host.id, conn)
                 publish()
                 out.value = PairState.Done(host)
             },
